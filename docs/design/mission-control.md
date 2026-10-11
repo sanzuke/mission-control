@@ -96,7 +96,7 @@ Dari `omp --help` (v18.8.9) tersedia hal-hal berikut. Yang bertanda ✔ langsung
 | Kendali dua arah | `omp acp` — server **Agent Client Protocol** via stdio (JSON-RPC). Dipakai bersama adapter `acp` generik | ✔ ada; ? cakupan event & permission |
 | Alternatif kendali | `omp --mode rpc` / `rpc-ui` (+ `--no-ui` untuk headless) | ✔ ada; ? skema pesan |
 | Satu kali jalan | `omp -p "…" --mode json` (keluaran JSON) | ✔ ada; ? apakah streaming per event |
-| Pantau sesi | berkas JSONL di `~/.omp/agent/sessions/--<path>--/session.jsonl` (bisa digeser `PI_CODING_AGENT_DIR` / `--session-dir`) | ✔ lokasi dari contoh `--export`; ? format record |
+| Pantau sesi | berkas JSONL di `~/.omp/agent/sessions/--<path>--/session.jsonl` (bisa digeser `PI_CODING_AGENT_DIR` / `--session-dir`) | ✔ format v3 terverifikasi dari sampel: `intent` per tool, `stopReason`, biaya per pesan |
 | Izin tool | `--approval-mode always-ask\|write\|yolo`, `--auto-approve`; di `rpc-ui` "tool UI" tetap aktif | ✔ flag ada; ? bagaimana permintaan izin dikirim lewat ACP/RPC |
 | Isolasi | `--profile <nama>` (auth, sesi, settings terpisah), `--cwd`, `--add-dir`, `--no-session` | ✔ |
 | Worktree | `omp worktree` (add/list/clear) — bisa dipakai WorktreeManager atau cukup `git worktree` kita sendiri | ✔ ada |
@@ -108,7 +108,7 @@ Dari `omp --help` (v18.8.9) tersedia hal-hal berikut. Yang bertanda ✔ langsung
 | Impor lintas-agent | `--from-claude`, `--from-codex` | ✔ bisa untuk "handoff" Claude → OMP |
 | Kolaborasi | `omp collab` (host session lokal), `omp stream` | ? tidak dipakai v1 |
 
-Urutan implementasi: (1) **observe** lewat watcher berkas sesi; (2) **run/interrupt** lewat `omp acp`; (3) **approval** setelah skema izin ACP diverifikasi; fallback `--mode rpc`. Seluruh asumsi ? ditutup dengan "golden file" dari sampel nyata sebelum Fase 5.
+Urutan implementasi: (1) **observe** lewat watcher berkas sesi; (2) **run/interrupt** lewat `omp acp`; (3) **approval** setelah skema izin ACP diverifikasi; fallback `--mode rpc`. Format berkas sesi sudah dianalisis dari sampel nyata di [omp-session-format.md](omp-session-format.md) (observe siap dirancang; sisanya masih menunggu sampel). Seluruh asumsi ? ditutup dengan "golden file" dari sampel nyata sebelum Fase 5.
 
 Kontrak diuji dengan rekaman event (golden files) per provider karena format tiap CLI berubah antarversi.
 
@@ -209,7 +209,7 @@ Dibedakan:
 
 Sudah dijawab: bangun baru (bukan fork CrewHub); lokal **dan** VPS; gaya karakter campuran; OMP = Oh My Pi v18.8.9.
 
-1. **Sampel OMP (sedang disiapkan)**: satu file `session.jsonl`; keluaran `omp -p "hello" --mode json`; log singkat `omp acp` saat satu prompt dengan satu panggilan tool (mis. `read`). Redaksi secret/path pribadi lebih dulu (ada `omp anonymize`).
+1. **Sampel OMP tambahan** (sampel sesi sudah diterima dan dianalisis): sesi dengan `--approval-mode always-ask` (untuk izin), sesi yang memakai tool `task`/`edit` (subagent dan edit), serta keluaran `omp acp` / `omp -p --mode json` untuk satu prompt dengan satu tool. Daftar lengkap di bagian 6 `omp-session-format.md`. Redaksi dulu dengan `omp anonymize`.
 2. Jalur OMP mana yang Anda pakai sehari-hari: sesi interaktif di terminal (→ cukup observe) atau Anda ingin Mission Control yang **menjalankan** OMP (→ acp/rpc)?
 3. Apakah Claude Code dan OMP sering dipakai di repo yang sama (menentukan aturan satu-worktree-per-kartu dan pemilihan agent per kartu)?
 4. Siapa saja yang mengakses dashboard dari VPS (hanya Anda, atau tim)? Menentukan apakah cukup token tunggal atau perlu akun.
