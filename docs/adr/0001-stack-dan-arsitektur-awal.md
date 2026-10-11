@@ -10,6 +10,8 @@ Mission Control harus memvisualkan banyak agent sebagai karakter 3D, punya kanba
 
 Riwayat: draf awal memilih Node/TS + R3F; draf kedua sempat pindah ke zero-dependency mengikuti dokumen muse.ai; setelah diklarifikasi bahwa dokumen itu bukan spesifikasi, keputusan kembali ke opsi 1 dengan pelajaran dari CrewHub.
 
+Cakupan produk (klarifikasi pemilik): monitoring agent adalah inti; agent di-assign ke proyek; setiap proyek punya task management sendiri. Menjalankan agent dari dashboard ditunda ke tahap kendali, sehingga v1 hanya mengamati (Collector tidak perlu men-spawn proses).
+
 ## Options considered
 
 1. **Node/TS daemon + React/R3F + SQLite + SSE** - satu bahasa, Claude Agent SDK tersedia di TS, ekosistem 3D web terbesar. Kekurangan: butuh build step dan npm.

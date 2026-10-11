@@ -1,19 +1,38 @@
 # Rancangan Mission Control
 
-> Status: draft v0.4 · 2026-10-11 · dokumen living (edit di tempat, riwayat lewat `git log -p`)
+> Status: draft v0.5 · 2026-10-11 · dokumen living (edit di tempat, riwayat lewat `git log -p`)
 > Referensi (bukan spesifikasi mengikat):
 > - Google Doc "Mission Control": ternyata prompt untuk muse.ai. Diambil ide fiturnya, bukan batasan tekniknya.
 > - [EKINSOL-DEV/crewhub](https://github.com/EKINSOL-DEV/crewhub) (AGPL-3.0): dipelajari arsitekturnya (lihat bagian 11). **Tidak ada kode yang disalin.**
 
 ## 1. Tujuan
 
-Dashboard untuk memantau dan mengarahkan banyak AI coding agent. Agent tampil sebagai **karakter 3D** di ruang kerja virtual, tugasnya dikelola di **kanban**.
+Tiga lapis, berurutan dari yang paling penting:
 
-1. **Claude Code** = integrasi paling dalam (monitor, kendali, approval).
-2. **OMP (Oh My Pi)** dan provider lain (Codex CLI, OpenClaw, Gemini CLI, API OpenAI-compatible) lewat satu antarmuka koneksi.
-3. **Kejujuran data**: status yang tampil harus berasal dari sumber nyata; kalau tak tersedia tampilkan "tidak tersedia", bukan angka palsu.
+1. **Monitoring agent** — lihat semua agent (Claude Code, OMP, dst.) di semua host: sedang apa, di proyek mana, sudah memakai berapa. Sumber data harus nyata; kalau tak tersedia tampilkan "tidak tersedia", bukan angka palsu.
+2. **Assign agent ke proyek** — agent adalah identitas persisten yang bisa ditugaskan ke satu atau beberapa proyek.
+3. **Task management per proyek** — setiap proyek punya papan kanban sendiri; kartu bisa ditugaskan ke agent yang tergabung di proyek itu.
 
-Bukan tujuan v1: editor kode di UI, multi-user/SaaS.
+Karakter 3D adalah cara menampilkan (1) dan (2): **satu ruangan = satu proyek**, karakter masuk ke ruangan saat di-assign. Integrasi Claude Code paling dalam; OMP dan provider lain lewat satu antarmuka koneksi.
+
+**Monitoring dulu, kendali belakangan.** v1 cukup *mengamati* dan *mengorganisir*. Menjalankan agent dari kartu ("Run with Agent"), approval dari UI, dan chat adalah tahap berikutnya.
+
+Bukan tujuan v1: editor kode di UI, multi-user/SaaS, menjalankan agent dari dashboard.
+
+## 1.1 Konsep inti
+
+```
+Host ──< Session >── Agent ──< Assignment >── Project ──< Task (kartu)
+ (mesin)  (run nyata)  (identitas)   (niat)      (repo)       (kanban proyek)
+```
+
+- **Agent** = identitas persisten (mis. "Claude – laptop A", "OMP – VPS"), bukan satu sesi. Sesi datang dan pergi; agent tetap.
+- **Session** = satu run yang terdeteksi dari transkrip/hook. Dipasangkan ke agent dengan aturan: `provider + host` (otomatis) atau penamaan manual.
+- **Project** = satu repo/folder (`name`, `repoPath` per host, `remoteUrl`). Dikenali dari `cwd` sesi (OMP: field `cwd` di header; Claude: folder di `~/.claude/projects/`).
+- **Assignment** = *niat*: agent X ditugaskan ke proyek P (boleh banyak-ke-banyak, dengan peran opsional: coder, reviewer…).
+- **Observasi = kenyataan**: proyek tempat sesi benar-benar berjalan ditentukan `cwd`. Jika berbeda dari assignment, tampilkan **"bekerja di luar proyek"** (bukan dikoreksi diam-diam) dan tawarkan *assign sekarang*.
+- **Task** = milik tepat satu proyek. `assignee` hanya boleh agent yang ter-assign ke proyek itu.
+- **Tautan task ↔ sesi**: tidak ditebak. Cara yang sah: (a) agent mengklaim kartu lewat MCP, (b) pengguna menautkan manual, (c) saran otomatis ("agent X punya 1 kartu In Progress di proyek ini dan sesinya baru mulai") yang harus dikonfirmasi. Sesi tanpa tautan tetap tampil di proyeknya sebagai "aktivitas tanpa kartu".
 
 ## 2. Arsitektur
 
@@ -48,11 +67,14 @@ Lihat ADR-0001. Mode Docker hanya bisa monitor (tak bisa menjalankan `claude`) �
 
 ## 3. Model data
 
-- **Agent**: `id, name, provider, model, persona, avatar, roomId, settings`.
-- **Session**: satu run provider (`providerSessionId`, status, activity, biaya/token).
-- **Task/Kartu**: `id, title, description, column, priority, labels, assignee, deps, branch, worktree, prUrl, acceptance`.
-- **Room**: dari **blueprint JSON** (tata letak, prop, meja kerja) — data-driven.
-- **MissionEvent** (append-only): `session.started | activity.changed | message | tool.start | tool.end | permission.requested | permission.resolved | subagent.started | subagent.ended | usage | error | session.ended`.
+- **Host**: `id, name, kind (laptop|vps), lastSeen, collectorVersion`.
+- **Project**: `id, name, slug, color, description`, plus **`ProjectPath`** per host: `(projectId, hostId, repoPath, remoteUrl?)`. Proyek dikenali dengan mencocokkan `cwd` sesi ke `repoPath` (akar git, bukan sub-folder); `cwd` yang belum dikenal masuk **Inbox "proyek belum terdaftar"** untuk di-assign/dibuat.
+- **Agent**: `id, name, provider, model?, hostId?, persona, avatar{bodyType,palette,accessory}, matchRule`.
+- **Assignment**: `(agentId, projectId, role?, since)`.
+- **Session**: `id, agentId, hostId, providerSessionId, cwd, projectId (turunan dari cwd), title, startedAt, lastEventAt, activity, usage{tokens,cost}`.
+- **Task (kartu)**: `id, projectId, title, description, column, priority, labels, assigneeAgentId?, linkedSessionIds[], deps[], dueAt?, createdBy`. Kolom default per proyek: `Backlog → Ready → In Progress → Review → Done` (+ `Blocked`), bisa disesuaikan per proyek.
+- **Room**: tata letak 3D per proyek dari blueprint JSON (1 proyek = 1 ruangan).
+- **MissionEvent** (append-only): `session.started | session.titled | session.model | activity.changed | message | tool.start | tool.end | permission.requested | permission.resolved | subagent.started | subagent.ended | usage | error | session.ended` + `task.created | task.moved | task.assigned | assignment.changed` (jejak audit task/assignment).
 - **AgentActivity**: `idle | thinking | tool_use | responding | waiting_input | waiting_permission | error`.
 
 ## 4. Integrasi Claude Code (utama)
@@ -131,7 +153,7 @@ VPS agent ─ Collector ──┘   (SQLite, SSE, Kanban)      └── (lewat 
 
 ## 6. Dunia 3D
 
-- **Scene**: kampus/kantor toon-shaded; **ruangan per proyek** (dari blueprint JSON) dengan meja kerja dan meja rapat. Lingkungan dapat diganti (kantor malam, taman, dst.).
+- **Scene**: kampus/kantor toon-shaded; **satu ruangan per proyek** (blueprint JSON) dengan meja kerja per agent anggota dan papan kanban mini di dinding (jumlah kartu per kolom, data asli). Agent yang belum di-assign berada di **lobi**; **drag karakter ke ruangan = membuat assignment** (dengan konfirmasi). Agent yang sedang bekerja di luar proyek assign-nya tampil dengan penanda dan garis ke ruangan tempat ia benar-benar bekerja. Lingkungan dapat diganti (kantor malam, taman, dst.).
 - **Kamera**: 3 level zoom — overview → fokus ruangan → close-up karakter. Aksi: klik karakter = Inspector; drag karakter ke ruangan lain = pindahkan agent; gelembung aktivitas di atas kepala.
 - **Karakter (campuran gaya)**: tiap agent memilih `bodyType` = `robot | human | animal` + palet warna + aksesori per peran (Coder, Designer, Researcher, QA, PM…). Satu rig/skeleton standar dan satu set klip animasi dipakai semua tipe, sehingga menambah gaya baru = menambah model, bukan menulis ulang animasi. Fase 2 memakai robot prosedural; human/animal ditambahkan sebagai GLB (aset sendiri atau di-generate lalu di-rig ke skeleton standar). Provider ikut terbaca visual lewat lencana kecil di karakter (Claude/OMP/dll.).
 - **Gerak**: jalan antar-ruangan dengan pathfinding A\*, tolak-menolak antar bot supaya tidak menumpuk, spawn sadar-grid.
@@ -149,16 +171,24 @@ VPS agent ─ Collector ──┘   (SQLite, SSE, Kanban)      └── (lewat 
   | selesai | cheer hop, kartu → Review |
 - **Performa/aksesibilitas**: low-poly, instancing, target 60 fps laptop biasa; mode **Zen/2D** (daftar agent + chat) bila WebGL lemah atau `prefers-reduced-motion`; mobile: viewport 3D mengambang kecil + panel responsif.
 
-## 7. Kanban & task management
+## 7. Task management per proyek
 
-Kolom: `Backlog → Ready → In Progress → Review → Done` (+ `Blocked`).
+Setiap proyek punya papan sendiri (tidak ada papan global; tampilan "Semua proyek" hanyalah agregasi baca-saja).
 
-- **Run with Agent**: assign + start → worktree & branch `mc/<id>-<slug>`, session dijalankan, kartu → In Progress.
-- Agent selesai → **Review** (bukan Done); manusia memilih *Terima* atau *Minta revisi* (komentar kembali ke agent sebagai prompt).
-- `waiting_permission/input` → label `needs-you`; kegagalan/stale → `Blocked` dengan alasan.
-- Dependensi antar-kartu, WIP limit per agent, batas anggaran per kartu, filter per agent/label.
-- Agent bisa menambah subtask lewat MCP; action item dari **rapat agent** (lihat bagian 8) bisa dijadikan kartu.
-- Opsional: sinkron dua arah dengan GitHub Issues/Projects.
+**v1 (tanpa menjalankan agent):**
+- Buat/edit/pindah/hapus kartu, drag antar kolom, prioritas, label, tenggat, dependensi.
+- **Assign kartu ke agent** yang ter-assign ke proyek (dropdown hanya menampilkan anggota proyek).
+- Kartu menampilkan badge status agent langsung: agent pemilik kartu sedang `tool_use`, `waiting_input`, offline, dll. (dari monitoring).
+- **Aktivitas tanpa kartu**: sesi agent di proyek yang belum ditautkan ke kartu muncul di panel samping proyek, bisa diubah jadi kartu ("Buat kartu dari sesi ini") atau ditautkan ke kartu yang ada.
+- Tautan kartu ↔ sesi (manual atau konfirmasi saran) membuat tab *Sesi* di kartu: judul, durasi, model, token/biaya, aktivitas terakhir.
+- Gerak kolom otomatis hanya **saran**, bukan aksi diam-diam: mis. sesi tertaut selesai (`stop`) → banner "Pindahkan ke Review?". Pengguna yang memutuskan; `Done` hanya oleh manusia.
+- Ringkasan per proyek: agent anggota (+ aktivitas), kartu per kolom, biaya total sesi tertaut, kartu macet (In Progress tanpa aktivitas agent > N jam).
+- Opsional: impor/sinkron dengan GitHub Issues/Projects.
+
+**Tahap berikutnya (kendali):**
+- **Run with Agent**: kartu di-Start → git worktree + branch `mc/<id>-<slug>`, sesi dijalankan lewat Collector, otomatis tertaut ke kartu.
+- Agent mengambil/menambah/memperbarui kartu sendiri lewat **MCP server kanban** (tool dibatasi pada proyek tempat agent ter-assign).
+- Review → *Terima / Minta revisi* (komentar jadi prompt baru), batas anggaran per kartu, WIP limit per agent, action item rapat agent → kartu.
 
 ## 8. Fitur kolaborasi & operasional (modul opsional)
 
@@ -181,15 +211,18 @@ Referensi (CrewHub) berangkat dari "tanpa autentikasi, khusus jaringan tepercaya
 
 ## 10. Roadmap
 
+Urutan mengikuti prioritas: monitoring → proyek & assignment → kanban per proyek → 3D → kendali.
+
 | Fase | Isi | Selesai bila |
 |---|---|---|
-| 0 | Repo, daemon, SQLite, SSE, skema `MissionEvent`, mode demo | event dummy ter-stream ke UI |
-| 1 | Watcher transkrip Claude Code + parser + Agent list | sesi `claude` nyata muncul & berubah status |
-| 2 | World 3D v1: 1 ruangan, 3 bot, 6 animasi inti | animasi cocok dengan aktivitas nyata |
-| 3 | Kanban + worktree + "Run with Agent" + Review | satu kartu end-to-end |
-| 4 | Hooks + ApprovalBroker + Inspector/Chat + MCP kanban | approve dari UI |
-| 5 | Adapter OMP + Codex/ACP | dua provider berjalan bersamaan |
-| 6 | Rooms/blueprint, rapat agent, metrics/cron, mobile, polish | siap rilis |
+| 0 | Repo, Daemon+Collector kerangka, SQLite, SSE, skema `MissionEvent`, fixture dari sampel | event dari fixture ter-stream ke UI |
+| 1 | **Monitoring**: watcher + parser OMP (v3) dan Claude Code; daftar Agent & Sesi dengan aktivitas, model, token/biaya | sesi nyata dari kedua provider tampil & berubah status |
+| 2 | **Proyek & assignment**: CRUD proyek, pemetaan `cwd`→proyek, Inbox proyek baru, assign agent↔proyek, penanda "bekerja di luar proyek" | agent bisa di-assign dan sesinya muncul di proyek yang benar |
+| 3 | **Kanban per proyek** (v1 tanpa menjalankan agent): kartu, kolom, assign ke agent, tautan kartu↔sesi, aktivitas tanpa kartu | satu proyek dikelola penuh dari papan |
+| 4 | **Dunia 3D**: ruangan per proyek, karakter, animasi dari aktivitas, drag-to-assign, mini-kanban di dinding, mode Zen/2D | tampilan 3D sinkron dengan data nyata |
+| 5 | Multi-host: Collector jarak jauh (VPS), token per-collector, hooks Claude | agent dari laptop dan VPS tampil bersamaan |
+| 6 | **Kendali**: Run with Agent + worktree, approval, chat, MCP kanban, adapter OMP via `acp` | kartu → sesi → Review end-to-end |
+| 7 | Rapat agent, metrics/cron, mobile, polish | siap rilis |
 
 ## 11. Pelajaran dari CrewHub
 
@@ -207,10 +240,12 @@ Dibedakan:
 
 ## 12. Pertanyaan terbuka
 
-Sudah dijawab: bangun baru (bukan fork CrewHub); lokal **dan** VPS; gaya karakter campuran; OMP = Oh My Pi v18.8.9.
+Sudah dijawab: bangun baru; lokal dan VPS; karakter campuran; OMP = Oh My Pi; konsep inti = monitoring → assign agent ke proyek → kanban per proyek.
 
-1. **Sampel OMP tambahan** (sampel sesi sudah diterima dan dianalisis): sesi dengan `--approval-mode always-ask` (untuk izin), sesi yang memakai tool `task`/`edit` (subagent dan edit), serta keluaran `omp acp` / `omp -p --mode json` untuk satu prompt dengan satu tool. Daftar lengkap di bagian 6 `omp-session-format.md`. Redaksi dulu dengan `omp anonymize`.
-2. Jalur OMP mana yang Anda pakai sehari-hari: sesi interaktif di terminal (→ cukup observe) atau Anda ingin Mission Control yang **menjalankan** OMP (→ acp/rpc)?
-3. Apakah Claude Code dan OMP sering dipakai di repo yang sama (menentukan aturan satu-worktree-per-kartu dan pemilihan agent per kartu)?
-4. Siapa saja yang mengakses dashboard dari VPS (hanya Anda, atau tim)? Menentukan apakah cukup token tunggal atau perlu akun.
-5. Aset karakter: pakai model gratis/lisensi terbuka, atau ada yang ingin dibuat khusus?
+1. **Definisi "agent"**: apakah satu agent = satu kombinasi *provider + host* (mis. "Claude di laptop A"), atau Anda memberi nama sendiri (mis. "Muse", "Aris") lalu memetakan sesi ke nama itu? Rekomendasi: otomatis `provider+host`, bisa diganti nama dan digabung manual.
+2. **Satu agent boleh di banyak proyek sekaligus?** Rekomendasi: ya (banyak-ke-banyak), karena sesi sebenarnya ditentukan `cwd`.
+3. **Pembuatan proyek**: otomatis dari `cwd` baru (masuk Inbox) lalu Anda konfirmasi, atau selalu dibuat manual dulu?
+4. **Kolom kanban**: pakai kolom default (Backlog → Ready → In Progress → Review → Done, + Blocked) atau Anda punya alur sendiri?
+5. **Sinkron dengan layanan task lain** (GitHub Issues/Projects, Huly, dll.) — perlu di v1, atau kanban lokal cukup? (Di sampel OMP terlihat Anda memakai konteks proyek "Huly".)
+6. **Sampel OMP tambahan** (izin `always-ask`, `task`/subagent, `edit`, `omp acp`) — lihat bagian 6 `omp-session-format.md`; hanya dibutuhkan untuk fase kendali dan subagent.
+7. Aset karakter: model gratis berlisensi terbuka atau dibuat khusus?

@@ -6,7 +6,7 @@ Versi: [Semantic Versioning](https://semver.org/lang/id/)
 ## [Unreleased]
 
 ### Added
-- Rancangan Mission Control v0.4 (docs/design): adapter OMP, arsitektur Collector+Daemon, karakter campuran; ADR-0001.
+- Rancangan Mission Control v0.5 (docs/design): berpusat pada monitoring agent, assignment ke proyek, dan kanban per proyek; ADR-0001.
 - Analisis format sesi OMP v3 (docs/design/omp-session-format.md).
 ### Changed
 ### Deprecated
