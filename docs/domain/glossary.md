@@ -32,6 +32,12 @@
 | TestRun / TestResult | `TestRun` | Satu eksekusi suite tes (mis. Playwright) beserta hasil per tes | Membawa `env` dan `build` |
 | Flaky | `status=flaky` | Tes yang lulus setelah retry | Tidak otomatis jadi saran bug |
 | Fingerprint bug | `fingerprint` | Hash tes + tanda tangan galat untuk mencegah duplikat | Kegagalan sama → bukti baru pada bug lama |
+| Komentar / Linimasa | `Comment` | Catatan bercap waktu pada kartu, digabung dengan peristiwa sistem | Jalur utama pelacakan pengujian QA |
+| Log uji | `Comment.kind=log-uji` | Catatan langkah dan temuan selama pengujian | Template opsional: Langkah / Ekspektasi / Aktual / Bukti |
+| Checklist uji | `ChecklistItem` | Butir uji manual pada kartu (todo, lulus, gagal, lewati) | Butir gagal → saran buat bug |
+| Branch → env | `BranchEnv` | Peta nama branch ke lingkungan deploy | Deploy mengikuti branch |
+| Fix commit | `Task.fixCommit` | Merge commit perbaikan | Harus leluhur SHA yang dideploy sebelum Retest dianggap sah |
+| Tautan Telegram | `externalIdentities.telegram` | Pemetaan orang ke chat Telegram lewat kode sekali pakai | Hanya chat tertaut yang diproses |
 | Integration | `Integration` | Sambungan ke layanan luar (Notion, Google, GitHub, GitLab) | Kredensial hanya referensi ke secret store |
 | Sinyal / Saran | status turunan | Peristiwa Git/CI/tes yang diubah menjadi usulan perpindahan kartu | Tidak mengubah status tanpa konfirmasi |
 | Room / Blueprint | `Room` | Ruangan 3D per proyek, didefinisikan JSON | Data-driven |

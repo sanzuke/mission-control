@@ -6,7 +6,7 @@ Versi: [Semantic Versioning](https://semver.org/lang/id/)
 ## [Unreleased]
 
 ### Added
-- Rancangan Mission Control v0.7 (docs/design): tim FE campuran, Playwright, GitHub/GitLab CI, jurnal ke Notion/Google Docs; ADR-0001..0003.
+- Rancangan Mission Control v0.8 (docs/design): komentar pengujian pada kartu, GitHub (branch→env), Telegram, Notion halaman per proyek; ADR-0001..0003.
 - Analisis format sesi OMP v3 (docs/design/omp-session-format.md).
 ### Changed
 ### Deprecated

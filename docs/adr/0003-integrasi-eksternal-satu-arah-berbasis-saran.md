@@ -16,7 +16,7 @@ Alur kerja pemilik melibatkan layanan di luar Mission Control: tes Playwright, G
 
 ## Decision
 
-Opsi 2. Sinyal dari Git/CI/Playwright hanya membuat *saran* (perpindahan kartu, bug baru, hasil retest) yang dikonfirmasi manusia; `Done` tetap manusia. Jurnal disimpan di Mission Control dan diterbitkan lewat `JournalPublisher` (Notion, Google Docs, Markdown) secara idempoten dan satu arah, dengan pratinjau dan konfirmasi. Artefak tes dan transkrip tidak disalin keluar; hanya tautan. Kredensial integrasi hanya berupa referensi ke secret store.
+Opsi 2. Sinyal dari Git/CI/Playwright hanya membuat *saran* (perpindahan kartu, bug baru, hasil retest) yang dikonfirmasi manusia; `Done` tetap manusia. Jurnal disimpan di Mission Control dan diterbitkan lewat `JournalPublisher` (Notion, Google Docs, Markdown) secara idempoten dan satu arah, dengan pratinjau dan konfirmasi. Artefak tes dan transkrip tidak disalin keluar; hanya tautan. Kredensial integrasi hanya berupa referensi ke secret store. GitHub didukung lebih dulu (GitLab menyusul lewat antarmuka yang sama); Telegram adalah satu-satunya kanal notifikasi dan hanya untuk notifikasi, komentar, serta aksi berisiko rendah (ambil/mulai); keputusan penting tetap lewat web. Retest hanya sah bila `fixCommit` adalah leluhur SHA yang dideploy.
 
 ## Consequences
 
