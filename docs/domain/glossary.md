@@ -27,7 +27,13 @@
 | Template alur | `WorkflowTemplate` | Rantai kartu terhubung dengan peran dan aturan buka-blokir | Bawaan: "Siklus bug" |
 | Rantai / Iterasi | `TaskRelation`, `iteration` | Perjalanan satu bug dari temuan sampai lulus retest | Retest gagal → iterasi + 1 |
 | Retest | kartu `kind=retest` | Pengujian ulang setelah deploy | Harus pada env+build yang sama dengan Deploy |
-| Jurnal | `JournalEntry` | Catatan progres harian per proyek | Digest otomatis hanyalah draf |
+| Jurnal | `JournalEntry` | Catatan progres harian per proyek | Digest otomatis hanyalah draf; sumber kebenaran di Mission Control |
+| Publisher | `JournalPublisher` | Penerbit jurnal ke target luar (Notion, Google Docs, Markdown) | Satu arah, pratinjau → konfirmasi, idempoten |
+| TestRun / TestResult | `TestRun` | Satu eksekusi suite tes (mis. Playwright) beserta hasil per tes | Membawa `env` dan `build` |
+| Flaky | `status=flaky` | Tes yang lulus setelah retry | Tidak otomatis jadi saran bug |
+| Fingerprint bug | `fingerprint` | Hash tes + tanda tangan galat untuk mencegah duplikat | Kegagalan sama → bukti baru pada bug lama |
+| Integration | `Integration` | Sambungan ke layanan luar (Notion, Google, GitHub, GitLab) | Kredensial hanya referensi ke secret store |
+| Sinyal / Saran | status turunan | Peristiwa Git/CI/tes yang diubah menjadi usulan perpindahan kartu | Tidak mengubah status tanpa konfirmasi |
 | Room / Blueprint | `Room` | Ruangan 3D per proyek, didefinisikan JSON | Data-driven |
 | Review | kolom kanban | Agent sudah selesai, menunggu diterima manusia | Selesai oleh agent belum berarti Done |
 | Stale | status turunan | Sesi aktif tanpa kabar terlalu lama | Bukan dianggap selesai |

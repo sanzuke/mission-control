@@ -6,7 +6,7 @@ Versi: [Semantic Versioning](https://semver.org/lang/id/)
 ## [Unreleased]
 
 ### Added
-- Rancangan Mission Control v0.6 (docs/design): siklus bug QA, segmen tautan task-sesi, peran, jurnal harian; ADR-0001, ADR-0002.
+- Rancangan Mission Control v0.7 (docs/design): tim FE campuran, Playwright, GitHub/GitLab CI, jurnal ke Notion/Google Docs; ADR-0001..0003.
 - Analisis format sesi OMP v3 (docs/design/omp-session-format.md).
 ### Changed
 ### Deprecated
