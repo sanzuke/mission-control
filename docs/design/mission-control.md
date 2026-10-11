@@ -1,6 +1,6 @@
 # Rancangan Mission Control
 
-> Status: draft v0.5 · 2026-10-11 · dokumen living (edit di tempat, riwayat lewat `git log -p`)
+> Status: draft v0.6 · 2026-10-11 · dokumen living (edit di tempat, riwayat lewat `git log -p`)
 > Referensi (bukan spesifikasi mengikat):
 > - Google Doc "Mission Control": ternyata prompt untuk muse.ai. Diambil ide fiturnya, bukan batasan tekniknya.
 > - [EKINSOL-DEV/crewhub](https://github.com/EKINSOL-DEV/crewhub) (AGPL-3.0): dipelajari arsitekturnya (lihat bagian 11). **Tidak ada kode yang disalin.**
@@ -32,7 +32,26 @@ Host ──< Session >── Agent ──< Assignment >── Project ──< Ta
 - **Assignment** = *niat*: agent X ditugaskan ke proyek P (boleh banyak-ke-banyak, dengan peran opsional: coder, reviewer…).
 - **Observasi = kenyataan**: proyek tempat sesi benar-benar berjalan ditentukan `cwd`. Jika berbeda dari assignment, tampilkan **"bekerja di luar proyek"** (bukan dikoreksi diam-diam) dan tawarkan *assign sekarang*.
 - **Task** = milik tepat satu proyek. `assignee` hanya boleh agent yang ter-assign ke proyek itu.
-- **Tautan task ↔ sesi**: tidak ditebak. Cara yang sah: (a) agent mengklaim kartu lewat MCP, (b) pengguna menautkan manual, (c) saran otomatis ("agent X punya 1 kartu In Progress di proyek ini dan sesinya baru mulai") yang harus dikonfirmasi. Sesi tanpa tautan tetap tampil di proyeknya sebagai "aktivitas tanpa kartu".
+- **Tautan task ↔ sesi (banyak-ke-banyak, berjangka waktu)**: satu sesi sering mengerjakan beberapa pekerjaan berurutan (mis. memperbarui dokumen progres, lalu memperbaiki FE, lalu testing), dan satu task bisa dikerjakan beberapa sesi. Maka tautan bukan `session → 1 task`, melainkan **segmen**: `(sessionId, taskId, dari, sampai)`. Sesi punya **Fokus** (task yang sedang dikerjakan); pengguna/agent mengganti fokus (satu klik di UI atau tool MCP `set_focus`), dan setiap pergantian menutup segmen lama serta membuka yang baru. Biaya/token dan aktivitas dihitung per segmen. Tidak ditebak: sistem hanya **menyarankan** pergantian fokus (mis. `cwd`/berkas yang disentuh berubah, atau `intent` menyebut pekerjaan lain) dan menunggu konfirmasi. Sebelum ada fokus, aktivitas masuk "tanpa kartu".
+
+## 1.2 Skenario acuan: siklus bug QA
+
+Pemilik adalah QA (manual + automation); satu sesi agent bisa memegang beberapa peran, dan sebuah bug melewati beberapa tim/agent:
+
+```
+Testing (QA)  ──gagal──►  [Bug]  ──►  [Fix]  ──►  [Deploy]  ──►  [Retest]  ──lulus──►  [Update dokumen]
+   ▲                       QA        role FE     env + build     QA, env sama                role Docs
+   │                                                                │
+   └───────────── gagal lagi: [Bug] baru, tertaut ke Retest (iterasi n+1) ◄┘
+```
+
+Aturan yang bisa dijalankan sistem **secara deterministik** (bukan tebakan):
+- Kartu `Fix` selesai (`Done` oleh manusia) → `Deploy` otomatis berpindah dari `Blocked` ke `Ready` (dependensi terpenuhi).
+- `Deploy` `Done` → `Retest` terbuka dan agent berperan QA di proyek itu diberi notifikasi.
+- `Retest` punya field hasil `lulus | gagal`. **Gagal** → sistem *menyarankan* kartu `Bug` baru (terisi bukti dan tertaut `retestOf`) dan menaikkan penghitung iterasi; **lulus** → `Update dokumen` terbuka dan bug induk bisa ditutup (oleh manusia).
+- Semua yang bersifat keputusan (Done, tutup bug, buat bug dari kegagalan) tetap konfirmasi manusia.
+
+Satu `Retest` harus menunjuk **env + build/commit yang sama** dengan `Deploy` sebelumnya; kalau berbeda, UI menampilkan peringatan.
 
 ## 2. Arsitektur
 
@@ -70,9 +89,15 @@ Lihat ADR-0001. Mode Docker hanya bisa monitor (tak bisa menjalankan `claude`) �
 - **Host**: `id, name, kind (laptop|vps), lastSeen, collectorVersion`.
 - **Project**: `id, name, slug, color, description`, plus **`ProjectPath`** per host: `(projectId, hostId, repoPath, remoteUrl?)`. Proyek dikenali dengan mencocokkan `cwd` sesi ke `repoPath` (akar git, bukan sub-folder); `cwd` yang belum dikenal masuk **Inbox "proyek belum terdaftar"** untuk di-assign/dibuat.
 - **Agent**: `id, name, provider, model?, hostId?, persona, avatar{bodyType,palette,accessory}, matchRule`.
-- **Assignment**: `(agentId, projectId, role?, since)`.
-- **Session**: `id, agentId, hostId, providerSessionId, cwd, projectId (turunan dari cwd), title, startedAt, lastEventAt, activity, usage{tokens,cost}`.
-- **Task (kartu)**: `id, projectId, title, description, column, priority, labels, assigneeAgentId?, linkedSessionIds[], deps[], dueAt?, createdBy`. Kolom default per proyek: `Backlog → Ready → In Progress → Review → Done` (+ `Blocked`), bisa disesuaikan per proyek.
+- **Assignment**: `(memberId, projectId, roles[], since)`; peran proyek: `qa | fe | be | docs | pm | …` (daftar bisa diubah per proyek). Satu agent boleh memegang beberapa peran. **Peran melekat pada assignment dan task, bukan pada agent.**
+- **Member**: `agent | person` (polimorfik). Assignee/anggota bisa agent AI maupun manusia (mis. tim FE yang manusia).
+- **Session**: `id, agentId, hostId, providerSessionId, cwd, projectId (turunan dari cwd), title, startedAt, lastEventAt, activity, focusTaskId?, usage{tokens,cost}`.
+- **TaskLink (segmen)**: `(sessionId, taskId, fromEventId, toEventId?)` — rentang peristiwa sesi yang dikerjakan untuk satu task; biaya/aktivitas dihitung per segmen.
+- **Task (kartu)**: `id, projectId, kind, title, description, column, priority, labels, assigneeMemberId?, assigneeRole?, deps[], dueAt?, env?, build?, result? (lulus|gagal, untuk Retest), iteration, evidence[], createdBy`. Kolom default per proyek: `Backlog → Ready → In Progress → Review → Done` (+ `Blocked`), bisa disesuaikan per proyek. `kind` ∈ `task | bug | fix | deploy | retest | docs` (bisa ditambah). `assigneeRole` tanpa `assigneeMemberId` = **antrean peran** (diambil anggota berperan itu).
+- **TaskRelation**: `(fromTaskId, toTaskId, type)` dengan `type` ∈ `blocks | parent | foundBy | retestOf | duplicates`.
+- **WorkflowTemplate** (per proyek): rantai kartu dengan peran, kolom awal, dan aturan buka-blokir; template bawaan **"Siklus bug"** (Bug → Fix → Deploy → Retest → Update dokumen).
+- **TestRun** *(opsional, fase lanjut)*: `projectId, source (playwright|cypress|junit|manual…), env, build, passed, failed, failures[], artifactLinks[]`; kegagalan bisa dijadikan kartu `bug` dengan bukti terlampir.
+- **JournalEntry**: `projectId, date, author, body, generated?` — jurnal progres harian per proyek (lihat 7.3).
 - **Room**: tata letak 3D per proyek dari blueprint JSON (1 proyek = 1 ruangan).
 - **MissionEvent** (append-only): `session.started | session.titled | session.model | activity.changed | message | tool.start | tool.end | permission.requested | permission.resolved | subagent.started | subagent.ended | usage | error | session.ended` + `task.created | task.moved | task.assigned | assignment.changed` (jejak audit task/assignment).
 - **AgentActivity**: `idle | thinking | tool_use | responding | waiting_input | waiting_permission | error`.
@@ -180,10 +205,30 @@ Setiap proyek punya papan sendiri (tidak ada papan global; tampilan "Semua proye
 - **Assign kartu ke agent** yang ter-assign ke proyek (dropdown hanya menampilkan anggota proyek).
 - Kartu menampilkan badge status agent langsung: agent pemilik kartu sedang `tool_use`, `waiting_input`, offline, dll. (dari monitoring).
 - **Aktivitas tanpa kartu**: sesi agent di proyek yang belum ditautkan ke kartu muncul di panel samping proyek, bisa diubah jadi kartu ("Buat kartu dari sesi ini") atau ditautkan ke kartu yang ada.
-- Tautan kartu ↔ sesi (manual atau konfirmasi saran) membuat tab *Sesi* di kartu: judul, durasi, model, token/biaya, aktivitas terakhir.
+- Tautan kartu ↔ sesi berupa **segmen** (lihat 1.1): kartu punya tab *Sesi* dengan daftar segmen (judul sesi, rentang waktu, model, token/biaya, aktivitas terakhir); sesi punya penanda **Fokus** yang bisa diganti cepat.
 - Gerak kolom otomatis hanya **saran**, bukan aksi diam-diam: mis. sesi tertaut selesai (`stop`) → banner "Pindahkan ke Review?". Pengguna yang memutuskan; `Done` hanya oleh manusia.
 - Ringkasan per proyek: agent anggota (+ aktivitas), kartu per kolom, biaya total sesi tertaut, kartu macet (In Progress tanpa aktivitas agent > N jam).
 - Opsional: impor/sinkron dengan GitHub Issues/Projects.
+
+### 7.1 Template alur & relasi kartu
+
+- Dari kartu `bug` (atau tombol **"Buat dari tes gagal"**) pengguna memilih template **Siklus bug**; sistem membuat rantai `Fix → Deploy → Retest → Update dokumen` sebagai kartu terhubung (`blocks`) dengan peran masing-masing, lalu **meminta konfirmasi** sebelum menyimpan. Kartu bisa diedit/dihapus setelah dibuat (tidak semua bug butuh dokumen).
+- Aturan buka-blokir pada bagian 1.2 dijalankan oleh TaskService, tercatat sebagai event `task.moved` dengan alasan ("dependensi Fix terpenuhi").
+- Tampilan **Rantai**: satu bug menampilkan seluruh perjalanannya (iterasi 1, 2, 3 …) dan status tiap langkah; filter papan per peran/jenis/iterasi.
+- Kartu `Deploy`/`Retest` menyimpan `env` dan `build`/commit; pengisian manual di v1 (integrasi CI/GitHub Actions menyusul).
+
+### 7.2 Peran, antrean, dan banyak agent per tim
+
+- Kartu dapat ditugaskan ke **anggota tertentu** atau ke **peran** (antrean). Anggota berperan itu melihat antrean di inbox-nya; "Ambil" = menugaskan ke dirinya (atau agent mengklaim lewat MCP pada tahap kendali).
+- Satu sesi bisa memegang peran berbeda di waktu berbeda: peran yang berlaku mengikuti **kartu fokus**, bukan label agent.
+- Anggota manusia diperlakukan sama seperti agent di papan (mereka tidak punya sesi/monitoring, hanya status yang diset manual).
+
+### 7.3 Jurnal & resume harian
+
+Dokumen progres dan "resume tiap hari" adalah pekerjaan rutin; Mission Control memegang datanya agar tidak ditulis dari ingatan:
+- **Digest harian otomatis (draf)** per proyek, dari data nyata: sesi hari itu (siapa, berapa lama, model, biaya), kartu yang berpindah kolom, bug baru/tertutup, hasil retest, kartu macet. Berlabel *dihasilkan*; tidak pernah dianggap final.
+- Pengguna (atau agent berperan `docs`) menyunting draf menjadi **JournalEntry**; ekspor sesuai kebutuhan ke Markdown atau ke berkas di repo.
+- Rekomendasi (selaras SOP dokumentasi): status harian disimpan di Mission Control, **bukan** di berkas yang di-commit; hanya dokumen yang memang bersifat tahan lama (ADR, alur bisnis, runbook, hasil uji acuan) yang masuk git. Kartu `Update dokumen` di akhir siklus bug menunjuk ke dokumen mana yang harus diperbarui.
 
 **Tahap berikutnya (kendali):**
 - **Run with Agent**: kartu di-Start → git worktree + branch `mc/<id>-<slug>`, sesi dijalankan lewat Collector, otomatis tertaut ke kartu.
@@ -218,7 +263,9 @@ Urutan mengikuti prioritas: monitoring → proyek & assignment → kanban per pr
 | 0 | Repo, Daemon+Collector kerangka, SQLite, SSE, skema `MissionEvent`, fixture dari sampel | event dari fixture ter-stream ke UI |
 | 1 | **Monitoring**: watcher + parser OMP (v3) dan Claude Code; daftar Agent & Sesi dengan aktivitas, model, token/biaya | sesi nyata dari kedua provider tampil & berubah status |
 | 2 | **Proyek & assignment**: CRUD proyek, pemetaan `cwd`→proyek, Inbox proyek baru, assign agent↔proyek, penanda "bekerja di luar proyek" | agent bisa di-assign dan sesinya muncul di proyek yang benar |
-| 3 | **Kanban per proyek** (v1 tanpa menjalankan agent): kartu, kolom, assign ke agent, tautan kartu↔sesi, aktivitas tanpa kartu | satu proyek dikelola penuh dari papan |
+| 3 | **Kanban per proyek** (v1 tanpa menjalankan agent): kartu, kolom, anggota (agent/orang) dan peran, antrean peran, segmen tautan kartu↔sesi + Fokus, aktivitas tanpa kartu | satu proyek dikelola penuh dari papan |
+| 3b | **Siklus bug**: jenis kartu, relasi `blocks/retestOf`, template alur, aturan buka-blokir, tampilan Rantai, `env/build` | satu bug berjalan Bug→Fix→Deploy→Retest→Update dokumen dengan aturan otomatis yang tercatat |
+| 3c | **Jurnal harian**: digest otomatis (draf), JournalEntry, ekspor Markdown; *opsional:* ingest hasil tes (TestRun) → buat bug dari kegagalan | digest hari ini akurat terhadap data sesi dan kartu |
 | 4 | **Dunia 3D**: ruangan per proyek, karakter, animasi dari aktivitas, drag-to-assign, mini-kanban di dinding, mode Zen/2D | tampilan 3D sinkron dengan data nyata |
 | 5 | Multi-host: Collector jarak jauh (VPS), token per-collector, hooks Claude | agent dari laptop dan VPS tampil bersamaan |
 | 6 | **Kendali**: Run with Agent + worktree, approval, chat, MCP kanban, adapter OMP via `acp` | kartu → sesi → Review end-to-end |
@@ -240,12 +287,15 @@ Dibedakan:
 
 ## 12. Pertanyaan terbuka
 
-Sudah dijawab: bangun baru; lokal dan VPS; karakter campuran; OMP = Oh My Pi; konsep inti = monitoring → assign agent ke proyek → kanban per proyek.
+Sudah dijawab: bangun baru; lokal dan VPS; karakter campuran; OMP = Oh My Pi; konsep inti = monitoring → assign agent ke proyek → kanban per proyek; satu sesi dapat memegang beberapa pekerjaan/peran (QA, FE, dokumentasi); alur bug QA seperti bagian 1.2.
 
-1. **Definisi "agent"**: apakah satu agent = satu kombinasi *provider + host* (mis. "Claude di laptop A"), atau Anda memberi nama sendiri (mis. "Muse", "Aris") lalu memetakan sesi ke nama itu? Rekomendasi: otomatis `provider+host`, bisa diganti nama dan digabung manual.
-2. **Satu agent boleh di banyak proyek sekaligus?** Rekomendasi: ya (banyak-ke-banyak), karena sesi sebenarnya ditentukan `cwd`.
-3. **Pembuatan proyek**: otomatis dari `cwd` baru (masuk Inbox) lalu Anda konfirmasi, atau selalu dibuat manual dulu?
-4. **Kolom kanban**: pakai kolom default (Backlog → Ready → In Progress → Review → Done, + Blocked) atau Anda punya alur sendiri?
-5. **Sinkron dengan layanan task lain** (GitHub Issues/Projects, Huly, dll.) — perlu di v1, atau kanban lokal cukup? (Di sampel OMP terlihat Anda memakai konteks proyek "Huly".)
-6. **Sampel OMP tambahan** (izin `always-ask`, `task`/subagent, `edit`, `omp acp`) — lihat bagian 6 `omp-session-format.md`; hanya dibutuhkan untuk fase kendali dan subagent.
-7. Aset karakter: model gratis berlisensi terbuka atau dibuat khusus?
+1. **"Tim FE" itu siapa?** Agent AI (beberapa sesi Claude/OMP), manusia (developer), atau campuran? Menentukan apakah anggota manusia perlu akun/notifikasi, dan apakah kartu FE ditangani otomatis oleh agent atau hanya dipantau.
+2. **Tes automation** apa yang dipakai (Playwright, Cypress, Selenium, Katalon, Postman/Newman, k6, lainnya)? Menentukan format ingest hasil tes (JUnit XML/JSON/Allure) dan bukti (screenshot/trace/video). Boleh ditunda setelah fase 3b.
+3. **Deploy**: ada berapa lingkungan (dev/staging/prod) dan bagaimana deploy dilakukan (GitHub Actions, GitLab CI, manual/SSH)? Untuk v1 `env/build` diisi manual; integrasi CI bisa menyusul.
+4. **Jurnal harian**: setuju disimpan di Mission Control (ekspor Markdown sesuai kebutuhan) dan bukan berkas di repo? Atau tim Anda mewajibkan berkas di repo/Notion/Google Docs?
+5. **Daftar peran proyek**: cukup `qa, fe, be, docs, pm`, atau ada peran lain (mis. `devops`, `ba`)?
+6. **Identifikasi agent**: otomatis `provider + host` (bisa diganti nama/digabung) — setuju? Karena peran kini melekat pada assignment/kartu, bukan agent, aturan ini cukup sederhana.
+7. **Pembuatan proyek** dari `cwd` baru: otomatis ke Inbox lalu dikonfirmasi, atau manual dulu?
+8. **Sinkron dengan tracker lain** (GitHub Issues, Huly, Jira…) — perlu di v1, atau kanban lokal cukup?
+9. **Sampel OMP tambahan** (izin `always-ask`, `task`/subagent, `edit`, `omp acp`) — hanya untuk fase kendali dan subagent (lihat `omp-session-format.md` bagian 6).
+10. Aset karakter: model gratis berlisensi terbuka atau dibuat khusus?

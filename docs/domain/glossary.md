@@ -7,7 +7,7 @@
 | Istilah (domain) | Di kode | Arti | Catatan |
 |---|---|---|---|
 | Agent | `Agent` | Identitas persisten, bukan satu sesi | Default: provider+host; tampil sebagai karakter 3D |
-| Session | `Session` | Satu run provider untuk satu task | Punya `providerSessionId` |
+| Session | `Session` | Satu run provider; boleh mengerjakan beberapa task berurutan | Punya `providerSessionId` dan `focusTaskId` |
 | Kartu / Task | `Task` | Unit kerja milik satu proyek | Worktree hanya saat tahap kendali |
 | Connection / Adapter | `AgentConnection` | Penghubung ke satu jenis provider | Menghasilkan `MissionEvent` |
 | Event | `MissionEvent` | Kejadian ternormalisasi | Penggerak animasi, kanban, log |
@@ -19,6 +19,15 @@
 | Assignment | `Assignment` | Penugasan agent ke proyek (niat) | Berbeda dari proyek tempat sesi benar-benar berjalan (`cwd`) |
 | Bekerja di luar proyek | status turunan | Sesi agent berjalan di `cwd` proyek lain dari assignment-nya | Ditampilkan, tidak dikoreksi otomatis |
 | Aktivitas tanpa kartu | status turunan | Sesi di proyek yang belum tertaut ke kartu | Bisa dijadikan/ditautkan ke kartu |
+| Fokus sesi | `Session.focusTaskId` | Task yang sedang dikerjakan sesi saat ini | Diganti manual/MCP; sistem hanya menyarankan |
+| Segmen | `TaskLink` | Rentang event sesi untuk satu task | Dasar penghitungan biaya per task |
+| Peran | `roles[]` | qa, fe, be, docs, pm … | Melekat pada assignment/kartu, bukan agent |
+| Member | `Member` | Agent AI atau manusia yang bisa jadi assignee | Manusia tidak punya sesi/monitoring |
+| Antrean peran | `assigneeRole` | Kartu untuk satu peran, belum diambil anggota tertentu | Diambil anggota berperan itu |
+| Template alur | `WorkflowTemplate` | Rantai kartu terhubung dengan peran dan aturan buka-blokir | Bawaan: "Siklus bug" |
+| Rantai / Iterasi | `TaskRelation`, `iteration` | Perjalanan satu bug dari temuan sampai lulus retest | Retest gagal → iterasi + 1 |
+| Retest | kartu `kind=retest` | Pengujian ulang setelah deploy | Harus pada env+build yang sama dengan Deploy |
+| Jurnal | `JournalEntry` | Catatan progres harian per proyek | Digest otomatis hanyalah draf |
 | Room / Blueprint | `Room` | Ruangan 3D per proyek, didefinisikan JSON | Data-driven |
 | Review | kolom kanban | Agent sudah selesai, menunggu diterima manusia | Selesai oleh agent belum berarti Done |
 | Stale | status turunan | Sesi aktif tanpa kabar terlalu lama | Bukan dianggap selesai |
