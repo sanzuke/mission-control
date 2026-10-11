@@ -6,7 +6,7 @@ Versi: [Semantic Versioning](https://semver.org/lang/id/)
 ## [Unreleased]
 
 ### Added
-- Rancangan Mission Control v0.2 (docs/design), diselaraskan dengan spesifikasi referensi, dan ADR-0001.
+- Rancangan Mission Control v0.3 (docs/design) dengan referensi muse.ai-prompt dan CrewHub, serta ADR-0001.
 ### Changed
 ### Deprecated
 ### Removed

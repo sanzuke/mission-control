@@ -7,15 +7,15 @@
 | Istilah (domain) | Di kode | Arti | Catatan |
 |---|---|---|---|
 | Agent | `Agent` | Identitas persisten AI coding (provider, model, persona, avatar) | Tampil sebagai karakter 3D |
-| Session | `session_id` | Satu run provider untuk satu task | Opsional di ledger |
-| Kartu | `board.json cards[]` | Unit kerja di kanban | 1 task = 1 git worktree |
-| Provider | `adapters/*.js` | Backend agent (Claude Code, OMP, Codex, ...) | Masuk lewat adapter |
-| Ledger | `data/tasks.jsonl` | Log append-only event kerja agent; sumber kebenaran status | status: started, progress, done, failed |
-| Roster | `data/agents.json` | Daftar id agent yang sah | Field `agent` di ledger wajib id roster |
-| Quick task | `data/queue.jsonl` | Antrean tugas cepat | Beda dengan kartu kanban (kerja terencana) |
-| Dispatch pause | `data/dispatch.json` | Saklar jeda pengiriman tugas | Tombol PAUSE/RESUME |
-| Review | kolom kanban | Agent sudah `done`, menunggu diterima manusia | `done` di ledger belum berarti Done di kanban |
-| Stale | status turunan | Task `started` tanpa kabar terlalu lama | Bukan dianggap selesai |
+| Session | `Session` | Satu run provider untuk satu task | Punya `providerSessionId` |
+| Kartu / Task | `Task` | Unit kerja di kanban | 1 kartu = 1 git worktree |
+| Connection / Adapter | `AgentConnection` | Penghubung ke satu jenis provider | Menghasilkan `MissionEvent` |
+| Event | `MissionEvent` | Kejadian ternormalisasi | Penggerak animasi, kanban, log |
+| Activity | `AgentActivity` | Keadaan agent saat ini | idle, thinking, tool_use, responding, waiting_input, waiting_permission, error |
+| Approval | `ApprovalBroker` | Izin manusia untuk aksi berisiko | Dari hook izin / `canUseTool` |
+| Room / Blueprint | `Room` | Ruangan 3D per proyek, didefinisikan JSON | Data-driven |
+| Review | kolom kanban | Agent sudah selesai, menunggu diterima manusia | Selesai oleh agent belum berarti Done |
+| Stale | status turunan | Sesi aktif tanpa kabar terlalu lama | Bukan dianggap selesai |
 
 ## Istilah yang gampang tertukar
 

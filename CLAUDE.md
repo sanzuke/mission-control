@@ -1,6 +1,6 @@
 # Mission Control
 
-Dashboard 3D (robot) untuk memantau dan mengarahkan AI agent. Utama: Claude Code, juga OMP dan provider lain, plus kanban. Node tanpa dependensi, satu index.html, ledger JSONL. Status: tahap rancangan, belum ada kode.
+Dashboard 3D untuk memantau dan mengarahkan AI agent (utama Claude Code; juga OMP dan provider lain) dengan kanban. Daemon Node/TS + UI React/R3F. Status: tahap rancangan, belum ada kode. Referensi CrewHub bersifat AGPL: pelajari ide, jangan salin kode.
 
 ## Dokumentasi
 - Rancangan: @docs/design/mission-control.md

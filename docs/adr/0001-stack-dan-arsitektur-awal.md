@@ -1,4 +1,4 @@
-# ADR-0001: Node.js tanpa dependensi + satu index.html, ledger JSONL sebagai sumber kebenaran
+# ADR-0001: Daemon Node/TS + UI React/R3F, event ternormalisasi lewat antarmuka AgentConnection
 
 - **Status:** Proposed
 - **Tanggal:** 2026-10-11
@@ -6,31 +6,33 @@
 
 ## Context
 
-Pemilik sudah menulis spesifikasi Mission Control (Google Doc referensi): backend Node tanpa dependensi, frontend satu `index.html` dengan Three.js r128 lokal, data JSON/JSONL tanpa database, polling 3 detik, dan prinsip "tidak ada data palsu". Target dijalankan di VPS/container kecil dan dibuka lewat tunnel. Kebutuhan tambahan: kanban, integrasi Claude Code, dan provider lain (OMP, dst.).
+Mission Control harus memvisualkan banyak agent sebagai karakter 3D, punya kanban, terintegrasi paling dalam dengan Claude Code, dan tetap bisa menyambung ke OMP serta provider lain. Dua referensi diperiksa: (1) Google Doc yang ternyata prompt untuk muse.ai (zero-dependency, polling, satu index.html) - hanya ide fitur, bukan batasan; (2) proyek open source CrewHub (FastAPI + React/Three.js + SQLite + SSE, lisensi AGPL-3.0) yang membuktikan pendekatan transkrip JSONL + SSE + dunia 3D bekerja.
 
-Versi awal rancangan ini mengusulkan stack React + react-three-fiber + SQLite + Claude Agent SDK; itu diganti karena bertentangan dengan batasan referensi.
+Riwayat: draf awal memilih Node/TS + R3F; draf kedua sempat pindah ke zero-dependency mengikuti dokumen muse.ai; setelah diklarifikasi bahwa dokumen itu bukan spesifikasi, keputusan kembali ke opsi 1 dengan pelajaran dari CrewHub.
 
 ## Options considered
 
-1. **Zero-dependency Node + single-file HTML + ledger JSONL (sesuai referensi)** - mudah di-deploy dan diaudit, tanpa build/npm. Kekurangan: tanpa framework dan loader GLB; kode UI besar dalam satu file.
-2. **React + R3F + SQLite + SDK** - ergonomi dan ekosistem lebih baik, tetapi menambah build step, npm, dan melanggar batasan referensi.
+1. **Node/TS daemon + React/R3F + SQLite + SSE** - satu bahasa, Claude Agent SDK tersedia di TS, ekosistem 3D web terbesar. Kekurangan: butuh build step dan npm.
+2. **Python FastAPI + React/R3F (seperti CrewHub)** - terbukti, `psutil`/proses mudah. Kekurangan: dua bahasa; SDK Claude TS tak dipakai langsung.
+3. **Zero-dependency Node + satu index.html (gaya muse.ai)** - paling ringan di-deploy; sulit dirawat untuk 3D, kanban, dan banyak adapter.
+4. **Fork CrewHub** - tercepat; terikat AGPL-3.0 dan arah proyek mereka.
 
 ## Decision
 
-Opsi 1. Ledger `data/tasks.jsonl` adalah sumber kebenaran status agent; semua provider (Claude Code lewat hooks dan headless `claude -p --output-format stream-json`, OMP, generic-cli) hanya meng-append event ke sana lewat adapter kecil. Kanban disimpan di `data/board.json` dan terhubung ke ledger lewat `task_id`. Karakter robot dibangun prosedural dari primitif Three.js.
+Opsi 1. Setiap provider mengimplementasikan `AgentConnection` dan mengeluarkan `MissionEvent`; UI hanya bergantung pada `capabilities`. Claude Code dipantau lewat transkrip JSONL + hooks dan dikendalikan lewat SDK/proses `claude`. Kode ditulis dari nol (tidak menyalin CrewHub) untuk menghindari kewajiban AGPL.
 
 ## Consequences
 
 **Yang jadi lebih mudah:**
-- Deploy `node server.js`; tidak ada npm/build; mudah diverifikasi dengan `node --check` dan `curl`.
-- Provider baru = satu adapter yang menulis event ledger.
+- Menambah provider = satu adapter; UI tidak berubah.
+- Satu bahasa untuk daemon, UI, dan tipe event.
 
 **Yang jadi lebih sulit / harga yang kita bayar:**
-- Tanpa SDK Claude, kita mem-parse stream-json sendiri; format bisa berubah antarversi CLI.
-- Polling 3 detik, bukan push; animasi bisa tertinggal beberapa detik.
-- JSONL tumbuh terus (perlu rotasi) dan tulis konkuren perlu `appendFile` per baris.
-- Satu `index.html` besar sulit dirawat; karakter prosedural kurang detail dibanding GLB.
+- Format transkrip/stream tiap CLI berubah antarversi; perlu golden-file test per provider.
+- Fitur provider tidak seragam sehingga UI harus mengikuti `capabilities`.
+- Ada build step dan dependensi npm; mode Docker hanya bisa monitor.
+- Performa 3D di browser dibatasi; perlu mode Zen/2D.
 
 **Yang perlu dipantau:**
-- Jika `index.html` melewati sekitar 3000 baris atau perlu GLB/animasi skeletal, pecah jadi modul atau izinkan loader yang di-vendor.
-- Jika perlu kendali dua arah real-time (approval), tinjau SSE/WebSocket.
+- Jawaban atas "bangun baru vs fork CrewHub" dan arti "OMP"; bila OMP tak bisa lewat CLI/ACP, tinjau antarmuka adapter.
+- Bila 3D tak mencapai 60 fps dengan >6 agent, tinjau OffscreenCanvas/WebGPU.

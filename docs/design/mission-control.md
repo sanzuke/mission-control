@@ -1,170 +1,174 @@
 # Rancangan Mission Control
 
-> Status: draft v0.2 · 2026-10-11 · dokumen living (edit di tempat, riwayat lewat `git log -p`)
-> v0.2: diselaraskan dengan spesifikasi referensi pemilik (Google Doc "Mission Control", 9 menu, ledger JSONL, tanpa dependensi). Kanban, adapter multi-provider, dan integrasi Claude Code adalah **tambahan** di atas spesifikasi itu.
+> Status: draft v0.3 · 2026-10-11 · dokumen living (edit di tempat, riwayat lewat `git log -p`)
+> Referensi (bukan spesifikasi mengikat):
+> - Google Doc "Mission Control": ternyata prompt untuk muse.ai. Diambil ide fiturnya, bukan batasan tekniknya.
+> - [EKINSOL-DEV/crewhub](https://github.com/EKINSOL-DEV/crewhub) (AGPL-3.0): dipelajari arsitekturnya (lihat bagian 11). **Tidak ada kode yang disalin.**
 
 ## 1. Tujuan
 
-Pusat kendali web untuk memantau dan mengarahkan tim AI agent secara real-time. Agent tampil sebagai **robot 3D** di Virtual Office, pekerjaannya tercatat di **ledger**, dan perencanaan kerja dikelola di **kanban**.
+Dashboard untuk memantau dan mengarahkan banyak AI coding agent. Agent tampil sebagai **karakter 3D** di ruang kerja virtual, tugasnya dikelola di **kanban**.
 
-1. **Claude Code** = integrasi paling dalam.
-2. **OMP** dan provider lain lewat adapter seragam.
-3. **Kejujuran data**: tidak ada angka/status simulasi. Kalau sumber data tidak tersedia, tampilkan "tidak tersedia", bukan nol atau placeholder.
+1. **Claude Code** = integrasi paling dalam (monitor, kendali, approval).
+2. **OMP** dan provider lain (Codex CLI, OpenClaw, Gemini CLI, API OpenAI-compatible) lewat satu antarmuka koneksi.
+3. **Kejujuran data**: status yang tampil harus berasal dari sumber nyata; kalau tak tersedia tampilkan "tidak tersedia", bukan angka palsu.
 
-Bukan tujuan v1: editor kode di UI, multi-user publik, database.
+Bukan tujuan v1: editor kode di UI, multi-user/SaaS.
 
-## 2. Prinsip teknis (dari referensi)
-
-- Backend: Node.js **tanpa dependensi eksternal** (`http`, `fs`, `child_process`), satu `server.js`, bind `127.0.0.1:3001`.
-- Frontend: satu `index.html` (HTML+CSS+JS inline), tanpa framework. Three.js r128 di-vendor di `vendor/three.min.js` (tanpa CDN).
-- Data: file JSON/JSONL di `data/`, tanpa database.
-- Update: frontend polling `GET /api/state` tiap 3 detik.
-- Tema: dark netral ala Linear/Vercel, kartu rounded 16px, badge pill; tanpa neon.
-
-Konsekuensi: karena Three.js r128 tidak membawa loader GLB di core dan kita menghindari dependensi, **karakter dibangun prosedural dari primitif** (robot dari box/sphere/cylinder + aksesori per peran). Impor GLB/VRM ditunda (fase lanjut).
-
-## 3. Arsitektur
+## 2. Arsitektur
 
 ```
-Browser: index.html (Three.js scene · 10 menu)  ──poll 3s──►  GET /api/state
-                                                 ──aksi────►  POST /api/queue | /api/dispatch | /api/board
-                                    ▲
-                           server.js (zero-dep)
-   ┌───────────────┬───────────────┼────────────────┬──────────────────┐
- ledger reader   board store    system probes    schedule scanner    adapters/
- tasks.jsonl     board.json     /proc, df, uptime cron.d/*.md        claude-code · omp · generic-cli
-   ▲
-   │ append event (started|progress|done|failed)
- Claude Code hooks · wrapper adapter · tugas manual dari agent
+┌──────────── Web UI (React + TS + react-three-fiber) ────────────┐
+│ World 3D │ Kanban │ Agents │ Inspector/Chat │ Log │ Metrics     │
+└──────▲───────────────────────────────┬──────────────────────────┘
+       │ SSE (event stream)            │ REST (perintah)
+┌──────┴───────────────────────────────▼──────────────────────────┐
+│ Daemon (Node + TS, Fastify)                                      │
+│  ConnectionManager ─ EventBus ─ TaskService ─ ApprovalBroker     │
+│  WorktreeManager ─ Scheduler ─ SQLite (tasks, agents, events)    │
+└──┬───────────────┬────────────────┬───────────────┬─────────────┘
+   │               │                │               │
+ ClaudeCode      OMP            Codex/ACP        OpenAI-compat
+ (transkrip JSONL + hooks + proses `claude`)
 ```
 
-**Ledger adalah sumber kebenaran status agent.** Semua adapter pada akhirnya hanya menambah baris ke `data/tasks.jsonl`; server hanya membaca. Ini membuat provider baru murah dan menjaga prinsip "data nyata".
+Semua provider mengimplementasikan satu `AgentConnection` dan menghasilkan `MissionEvent` ternormalisasi. UI tidak tahu provider mana yang dipakai; ia hanya membaca `capabilities`.
 
-### Struktur folder
-```
-server.js            index.html          watchdog.sh        PUBLIC_URL.txt
-vendor/three.min.js
-adapters/            claude-code.js  omp.js  generic-cli.js
-hooks/               mc-hook.sh          # dipasang ke .claude/settings.json
-data/                tasks.jsonl  queue.jsonl  dispatch.json  board.json  agents.json
-docs/
-```
+### Stack
+| Lapisan | Pilihan | Alasan |
+|---|---|---|
+| Daemon | Node + TypeScript, Fastify | satu bahasa dengan UI; Claude Agent SDK berbasis TS |
+| Real-time | SSE (+ REST untuk perintah) | cukup untuk arus satu arah, lebih sederhana dari WebSocket |
+| Storage | SQLite + tabel event append-only | lokal, tanpa server |
+| UI | React, Vite, Tailwind, Zustand | |
+| 3D | three.js + react-three-fiber + drei | toon-shaded, karakter GLB/prosedural |
+| Packaging | `npx`/Docker; opsional Tauri | |
 
-## 4. Data (ledger)
+Lihat ADR-0001. Mode Docker hanya bisa monitor (tak bisa menjalankan `claude`) — didokumentasikan jelas.
 
-Sesuai referensi:
-- `data/tasks.jsonl`: `{ts, task_id, agent, subagent, title, status: started|progress|done|failed, detail}`. `task_id` stabil; `agent` wajib id roster.
-- `data/queue.jsonl`: `{ts, prompt, agent, status: queued|done}`.
-- `data/dispatch.json`: `{"paused": false}`.
+## 3. Model data
 
-Tambahan (kompatibel mundur, field opsional):
-- `tasks.jsonl` boleh membawa `provider` (`claude-code|omp|...`), `session_id`, `tokens`, `cost`, `card_id` (menautkan ke kartu kanban).
-- `data/board.json`: `{columns:[...], cards:[{id, title, description, column, agent, labels, priority, deps, task_id, branch, createdAt}]}` ditulis atomik (tulis ke `.tmp` lalu `rename`).
-- `data/agents.json`: roster (id, nama, peran, provider, model, ciri visual) agar roster dapat diubah tanpa menyentuh kode.
+- **Agent**: `id, name, provider, model, persona, avatar, roomId, settings`.
+- **Session**: satu run provider (`providerSessionId`, status, activity, biaya/token).
+- **Task/Kartu**: `id, title, description, column, priority, labels, assignee, deps, branch, worktree, prUrl, acceptance`.
+- **Room**: dari **blueprint JSON** (tata letak, prop, meja kerja) — data-driven.
+- **MissionEvent** (append-only): `session.started | activity.changed | message | tool.start | tool.end | permission.requested | permission.resolved | subagent.started | subagent.ended | usage | error | session.ended`.
+- **AgentActivity**: `idle | thinking | tool_use | responding | waiting_input | waiting_permission | error`.
 
-Event tak dikenal/baris rusak di-skip tanpa crash.
+## 4. Integrasi Claude Code (utama)
 
-## 5. API
+Tiga sumber dipadukan; hooks memberi kepastian, transkrip memberi kelengkapan:
 
-- `GET /api/state` → `agents, queue, tasks, board, system, vps, schedules, dispatch_paused, log` (+ `tokens` bila tersedia).
-- `POST /api/queue` `{prompt, agent}` · `POST /api/dispatch` `{paused}` (sesuai referensi).
-- `POST /api/board/card` · `PATCH /api/board/card/:id` (pindah kolom, assign, edit) · `DELETE`.
-- `POST /api/agent/:id/pause|resume` (klik karakter di 3D).
-- Semua `POST` hanya dari origin yang sama + token sederhana bila diakses lewat tunnel publik.
+1. **Watcher transkrip** — pantau `~/.claude/projects/*/*.jsonl` (scan file baru ±1 dtk, deteksi perubahan lewat `stat`). Parser bertipe untuk record `assistant | user | system | progress | summary | file-history-snapshot | queue-operation`. Rekaman nyata punya `progress` bertipe `bash_progress` dan `hook_progress`; `summary` dipakai untuk judul sesi. Record tak dikenal **dicatat dan diabaikan**, tidak membuat crash.
+2. **Hooks** (`SessionStart, PreToolUse, PostToolUse, Notification/PermissionRequest, SubagentStop, Stop`) → `POST /hooks/claude`. Ini memberi sinyal pasti untuk `waiting_permission` dan akhir giliran, sehingga tidak perlu menebak dari timeout. Hooks bersifat opsional: tanpa hooks, fallback ke heuristik transkrip (tool_use tanpa hasil ±7 dtk ⇒ menunggu izin; teks tanpa lanjutan ±5 dtk ⇒ menunggu input).
+3. **Kendali** — Claude Agent SDK / spawn `claude -p --output-format stream-json --resume` dengan `cwd` = git worktree kartu; `canUseTool` terhubung ke ApprovalBroker (approve/deny dari UI); interrupt.
 
-Status agent diturunkan, bukan disimpan: `working` jika event terakhirnya `started|progress` dan belum `done|failed`; `paused` jika dispatch/agent dijeda; selain itu `idle`. Task `started` tanpa kabar > N menit ditandai `stale` (bukan diam-diam dianggap selesai).
+Tambahan: **MCP server kanban** agar Claude bisa `list_tasks / claim_task / update_task / add_subtask`; **Handoff** "Lanjutkan di…" (Terminal/VS Code dengan `claude --resume <id>`); subagent muncul sebagai karakter kecil di dekat induknya; judul aktivitas yang mudah dibaca ("Reading config.py", "Running: npm test") dari input tool.
 
-## 6. Integrasi Claude Code (utama)
+## 5. Lapisan provider
 
-Semua jalur menulis ke ledger, jadi tidak butuh SDK/npm:
-
-1. **Hooks (amati):** `hooks/mc-hook.sh` dipasang ke `.claude/settings.json` untuk `SessionStart, PreToolUse, PostToolUse, Notification, SubagentStop, Stop`. Skrip membaca JSON stdin dan meng-append event ke `tasks.jsonl` (`started` saat sesi mulai, `progress` per tool, `done` saat `Stop`). Session `claude` manual di terminal pun ikut tampil. `subagent` = id subagent Claude (sesuai field `subagent` di ledger).
-2. **Headless runner (kendali):** adapter `claude-code.js` men-spawn `claude -p --output-format stream-json --resume <id>` lewat `child_process`, `cwd` = git worktree kartu, parsing JSONL stream → ledger. Dipicu saat item `queue.jsonl` dispatch atau kartu kanban di-"Start". Menghormati `dispatch.json` (pause).
-3. **MCP kanban (opsional, fase lanjut):** server MCP stdio kecil (JSON-RPC manual, tanpa dependensi) dengan tool `list_cards`, `claim_card`, `update_card`, `add_subtask`, `comment_card` agar Claude bisa mengambil dan memperbarui kartu sendiri.
-4. Token/biaya: dari field `usage`/`total_cost_usd` di stream-json; menu Token Status membaca ini bila ada, selain itu tampil "tidak tersedia".
-
-## 7. Lapisan provider
-
-Kontrak adapter (modul CommonJS kecil):
-```js
-module.exports = {
-  id: 'claude-code',
-  capabilities: { observe: true, run: true, interrupt: true, approvals: false, usage: true },
-  run({ card, prompt, cwd, agent }) { /* spawn; return { pid, stop() } */ },
-};
-// Kewajiban: semua output dinormalisasi menjadi baris ledger via appendEvent().
+```ts
+interface AgentConnection {
+  id: string;
+  capabilities: { observe; run; interrupt; approvals; resume; subagents; usage: boolean };
+  discover(): Promise<SessionInfo[]>;
+  history(sessionId): Promise<HistoryMessage[]>;
+  start(opts: { cwd; prompt; model?; agentId }): Promise<Session>;
+  send(session, text): Promise<void>;
+  interrupt(session): Promise<void>;
+  events(): AsyncIterable<MissionEvent>;
+}
 ```
 | Adapter | Cara | Catatan |
 |---|---|---|
-| `claude-code` | hooks + headless runner | fitur penuh |
-| `omp` | **asumsi**: proses CLI dengan keluaran JSON-lines/RPC | perlu konfirmasi apa itu OMP |
-| `generic-cli` | spawn perintah + pola parse yang dikonfigurasi di `agents.json` | fallback agent apa pun |
-| `api` | loop HTTP ke endpoint kompatibel OpenAI | ditunda, butuh loop tool-use sendiri |
+| `claude-code` | transkrip + hooks + proses/SDK | fitur penuh |
+| `omp` | *asumsi*: CLI/RPC dengan keluaran JSON-lines | **perlu konfirmasi apa itu OMP** |
+| `codex` | transkrip sesi Codex CLI + proses | seperti claude-code, format berbeda |
+| `acp` | Agent Client Protocol via stdio | satu adapter untuk banyak agent |
+| `openai-compat` | loop tool-use sendiri via HTTP | ditunda |
 
-UI membaca `capabilities`: tombol yang tidak didukung provider disembunyikan.
+Kontrak diuji dengan rekaman event (golden files) per provider karena format tiap CLI berubah antarversi.
 
-## 8. Menu & tampilan
+## 6. Dunia 3D
 
-Sidebar kiri + topbar, 10 menu (9 dari referensi + Kanban):
-1. **Virtual Office** (default): ruangan 3D (meja, 2 monitor — kode scrolling & chart animasi —, kursi, jendela kota malam, tanaman, lampu status). Agent bekerja → **duduk di meja** dengan animasi sesuai peran (mengetik / menggambar); idle → **berdiri di barisan belakang**. Transisi posisi smooth, kedip, idle sway, *cheer hop* saat selesai. Kamera drag-rotate + scroll-zoom. **Klik karakter = pause/resume.** Di HP: canvas fullscreen tanpa sisa hitam dan tidak bisa di-scroll (`100dvh`, `touch-action:none`, `overscroll-behavior:none`).
-2. **Agent Overview**: kartu per agent (working/idle/paused + task aktif).
-3. **Kanban** *(baru)*: papan Backlog → Ready → In Progress → Review → Done (+ Blocked); drag kartu, assign ke agent, tombol Start.
-4. **Task Queue**: antrean quick task + badge + tombol Research/Coding/Vision/Design.
-5. **System Metrics**: CPU load, memory, uptime dari `/proc`, 3 detik.
-6. **VPS Status**: 7 kartu (Disk ≥90% merah, CPU, Memory, Uptime, Tunnel ONLINE/OFFLINE, OS, Watchdog terakhir).
-7. **Tugas Terjadwal**: dari frontmatter YAML `.md` (parser sederhana tanpa library), "Jadwal Saya" di atas, "Jadwal Sistem" collapsible, label Indonesia, waktu WIB.
-8. **Token Status**: pemakaian vs batas paket bila terbaca; selain itu "tidak tersedia" yang mudah disambung.
-9. **Agent Fleet**: daftar agent + kemampuan.
-10. **Real-Time Log**: tail `tasks.jsonl`/log.
+- **Scene**: kampus/kantor toon-shaded; **ruangan per proyek** (dari blueprint JSON) dengan meja kerja dan meja rapat. Lingkungan dapat diganti (kantor malam, taman, dst.).
+- **Kamera**: 3 level zoom — overview → fokus ruangan → close-up karakter. Aksi: klik karakter = Inspector; drag karakter ke ruangan lain = pindahkan agent; gelembung aktivitas di atas kepala.
+- **Karakter**: bot dengan kepribadian/peran (Worker, Thinker, Coder, Designer, Comms…), aksesori per peran. Mulai prosedural; dukungan GLB belakangan.
+- **Gerak**: jalan antar-ruangan dengan pathfinding A\*, tolak-menolak antar bot supaya tidak menumpuk, spawn sadar-grid.
+- **Mapping aktivitas → animasi**:
+  | Activity | Visual |
+  |---|---|
+  | idle | berdiri/berkeliling di area santai |
+  | thinking | tangan di dagu, gelembung "…" |
+  | tool_use (Read/Grep) | menatap layar/dokumen |
+  | tool_use (Edit/Write) | duduk di meja, mengetik |
+  | tool_use (Bash) | menekan tombol, lampu meja berkedip |
+  | responding | bicara, gelembung teks |
+  | waiting_permission | angkat tangan + ikon ❗ (klik → approve/deny) |
+  | error | kaget, lampu merah |
+  | selesai | cheer hop, kartu → Review |
+- **Performa/aksesibilitas**: low-poly, instancing, target 60 fps laptop biasa; mode **Zen/2D** (daftar agent + chat) bila WebGL lemah atau `prefers-reduced-motion`; mobile: viewport 3D mengambang kecil + panel responsif.
 
-Memory VPS: karena di container, pakai jumlah RSS semua proses (`/proc/<pid>/statm` kolom resident × page size), label **"MEMORY (CONTAINER)"** + subteks `container kita • host: X / Y GB (di luar kendali)`. Bukan PSS (`smaps_rollup` tidak selalu terbaca).
+## 7. Kanban & task management
 
-### Mapping event → animasi robot
-| Kondisi (dari ledger) | Visual |
-|---|---|
-| tak ada task aktif | berdiri di barisan belakang, idle sway |
-| `started`/`progress` | pindah ke meja, animasi sesuai peran |
-| `detail` menyebut tool Edit/Write | mengetik cepat; Read/Grep → menoleh ke monitor; Bash → lampu meja berkedip |
-| `done` | cheer hop, lalu kembali ke barisan |
-| `failed` / `stale` | kepala menunduk, lampu status merah |
-| paused | membeku, ikon jeda |
+Kolom: `Backlog → Ready → In Progress → Review → Done` (+ `Blocked`).
 
-Peran → properti visual (dari roster): `aris` baret ungu + stylus + tablet; `udin` headphone + tema merah REC; `vision-agent-03` mata kamera; `research-agent-01` kaca pembesar/antena; `coding-agent-02` keyboard; `muse` robot default.
+- **Run with Agent**: assign + start → worktree & branch `mc/<id>-<slug>`, session dijalankan, kartu → In Progress.
+- Agent selesai → **Review** (bukan Done); manusia memilih *Terima* atau *Minta revisi* (komentar kembali ke agent sebagai prompt).
+- `waiting_permission/input` → label `needs-you`; kegagalan/stale → `Blocked` dengan alasan.
+- Dependensi antar-kartu, WIP limit per agent, batas anggaran per kartu, filter per agent/label.
+- Agent bisa menambah subtask lewat MCP; action item dari **rapat agent** (lihat bagian 8) bisa dijadikan kartu.
+- Opsional: sinkron dua arah dengan GitHub Issues/Projects.
 
-## 9. Kanban ↔ ledger
+## 8. Fitur kolaborasi & operasional (modul opsional)
 
-Kartu dan event dihubungkan lewat `task_id`/`card_id`:
-- Start kartu → buat worktree+branch `mc/<id>-<slug>`, append `started`, kartu → In Progress.
-- `progress` → kartu tetap, tampil detail terakhir.
-- `done` → kartu ke **Review** (bukan Done): selesai oleh agent ≠ diterima manusia. Tombol *Terima → Done* / *Minta revisi* (kirim komentar kembali sebagai prompt baru).
-- `failed` atau `stale` → **Blocked** dengan alasan.
-- Dependensi: kartu `Ready` hanya bisa Start bila dependensinya `Done`. WIP limit per agent (default 1).
+Dipilih dari ide referensi, dikerjakan setelah inti stabil:
+- **Group chat & rapat terstruktur** (round-robin antar-agent → ringkasan, keputusan, action item → kartu).
+- **Persona tuning** per agent (preset + sifat).
+- **System/VPS metrics** (CPU, memori container dari `/proc`, disk, uptime) dan **jadwal cron** (file `.md` berfrontmatter) bila Mission Control dijalankan di server.
+- **Tunnel + watchdog** untuk akses jarak jauh; lihat keamanan.
+- **Mode demo** dengan agent tiruan yang diberi label jelas "DEMO" (satu-satunya tempat data simulasi diizinkan).
+- **Modding**: prop/lingkungan/blueprint lewat JSON dengan ID ber-namespace.
 
-## 10. Akses publik & operasional
+## 9. Keamanan
 
-- **bore** meng-expose :3001, URL di `PUBLIC_URL.txt`.
-- `watchdog.sh` (cron 5 menit): cek tunnel; mati/URL berubah → restart, update `PUBLIC_URL.txt`, catat ke `watchdog-history.jsonl`, laporkan URL baru.
-- Aturan: baca `PUBLIC_URL.txt` dan live-check HTTP 200 sebelum membagikan link.
-- Karena bisa publik: wajib token untuk `POST` dan opsi basic-auth pada seluruh UI; secret provider tidak pernah masuk ledger atau `/api/state`; kendali hanya mengeksekusi perintah yang ada di whitelist adapter (tidak ada shell bebas dari UI).
+Referensi (CrewHub) berangkat dari "tanpa autentikasi, khusus jaringan tepercaya". Kita tidak mengikuti default itu:
+- Bind `127.0.0.1`; **token wajib** untuk REST, SSE, dan receiver hooks; akses jarak jauh hanya lewat TLS + auth.
+- Perintah yang bisa dijalankan UI dibatasi (whitelist adapter); tidak ada shell bebas.
+- Secret provider tidak masuk event log/UI. Transkrip dapat memuat secret: tampilkan terpotong, dan jangan kirim keluar mesin.
+- Agent bekerja di worktree terisolasi; merge hanya lewat aksi manusia di kolom Review.
+- Aksi berisiko selalu lewat ApprovalBroker.
 
-## 11. Roadmap
+## 10. Roadmap
 
 | Fase | Isi | Selesai bila |
 |---|---|---|
-| 0 | `server.js` + `/api/state` + data nyata (system, vps) + folder `data/` | `curl /api/state` menampilkan field nyata |
-| 1 | `index.html`: layout, tema, menu Agent Overview/Queue/Metrics/VPS/Log/Fleet | semua menu tampil dengan data nyata |
-| 2 | Virtual Office 3D: ruangan, 6 robot, state dari ledger, klik pause, mobile fullscreen | animasi cocok dengan event ledger |
-| 3 | Hooks Claude Code → ledger | sesi `claude` manual muncul sebagai robot |
-| 4 | Kanban + worktree + Start via headless runner | satu kartu end-to-end sampai Review |
-| 5 | Jadwal (cron .md), Token Status, tunnel + watchdog | semua 10 menu selesai |
-| 6 | Adapter OMP + generic-cli; MCP kanban; polish | dua provider jalan bersamaan |
+| 0 | Repo, daemon, SQLite, SSE, skema `MissionEvent`, mode demo | event dummy ter-stream ke UI |
+| 1 | Watcher transkrip Claude Code + parser + Agent list | sesi `claude` nyata muncul & berubah status |
+| 2 | World 3D v1: 1 ruangan, 3 bot, 6 animasi inti | animasi cocok dengan aktivitas nyata |
+| 3 | Kanban + worktree + "Run with Agent" + Review | satu kartu end-to-end |
+| 4 | Hooks + ApprovalBroker + Inspector/Chat + MCP kanban | approve dari UI |
+| 5 | Adapter OMP + Codex/ACP | dua provider berjalan bersamaan |
+| 6 | Rooms/blueprint, rapat agent, metrics/cron, mobile, polish | siap rilis |
 
-Aturan kerja tiap fase (dari referensi): `node --check`, restart server, `curl /api/state`, pastikan field baru ada.
+## 11. Pelajaran dari CrewHub
+
+Diambil (ide):
+- Abstraksi koneksi + `ConnectionManager`; semua sumber → satu bentuk `SessionInfo`/`HistoryMessage`.
+- Monitor Claude Code lewat transkrip JSONL tanpa mengubah Claude; SSE untuk push.
+- Aktivitas terbaca manusia di bot/chat; blueprint ruangan JSON; mode Zen; handoff `claude --resume`; mode demo.
+- Dokumen gap-analysis mereka menunjukkan jebakan: parser yang diam-diam membuang tipe record, perbedaan antara rekaman nyata dan asumsi (mis. `agent_progress` tak pernah muncul), dan mode Docker yang tak bisa menjalankan CLI.
+
+Dibedakan:
+- Autentikasi aktif secara default (lihat bagian 9).
+- Hooks sebagai sinyal izin yang pasti, bukan hanya heuristik timeout.
+- Kanban terikat git worktree + alur Review manusia; ApprovalBroker dari UI.
+- Lisensi: CrewHub AGPL-3.0 — menyalin kode membuat turunan AGPL. Kita menulis dari nol.
 
 ## 12. Pertanyaan terbuka
 
-1. **OMP** = apa persisnya, dan bagaimana cara diintegrasikan (CLI/RPC)?
-2. **Roster**: referensi minta konfirmasi nama/peran/ciri visual sebelum membangun. Pakai 6 agent di atas apa adanya, dan apa `coding-agent-02` itu Claude Code?
-3. **Lokasi cron** selain `~/workspace/cron.d/` dan `~/workspace/goals/*/crons/`?
-4. **Token Status**: perintah status langganan mana yang tersedia di server (mis. output `/usage`/`ccusage`)?
-5. Apakah dashboard cukup *memantau + mengantrekan* (v1), atau harus ikut *menjalankan* agent (fase 4)?
+1. **Bangun baru atau fork/kontribusi ke CrewHub?** Fork = cepat tetapi terikat AGPL dan arah proyek mereka. Rekomendasi: bangun baru, bila tujuan Anda berbeda (mis. kanban+worktree+approval sebagai inti).
+2. **OMP** = apa persisnya dan bagaimana integrasinya?
+3. Di mana ini dijalankan: laptop lokal, VPS/server, atau keduanya? (menentukan apakah modul metrics/tunnel dibutuhkan)
+4. Gaya karakter: robot (seperti referensi), orang/chibi, atau hewan? Pakai aset sendiri atau kami buatkan?
+5. Provider mana yang paling dulu setelah Claude Code: OMP, Codex, atau yang lain?
