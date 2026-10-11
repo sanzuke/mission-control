@@ -34,5 +34,5 @@ Opsi 1. Setiap provider mengimplementasikan `AgentConnection` dan mengeluarkan `
 - Performa 3D di browser dibatasi; perlu mode Zen/2D.
 
 **Yang perlu dipantau:**
-- Jawaban atas "bangun baru vs fork CrewHub" dan arti "OMP"; bila OMP tak bisa lewat CLI/ACP, tinjau antarmuka adapter.
+- Jawaban atas "bangun baru vs fork CrewHub" dan verifikasi mode RPC OMP (Oh My Pi); bila OMP tak bisa lewat CLI/ACP, tinjau antarmuka adapter.
 - Bila 3D tak mencapai 60 fps dengan >6 agent, tinjau OffscreenCanvas/WebGPU.

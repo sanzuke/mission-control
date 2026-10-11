@@ -10,7 +10,7 @@
 Dashboard untuk memantau dan mengarahkan banyak AI coding agent. Agent tampil sebagai **karakter 3D** di ruang kerja virtual, tugasnya dikelola di **kanban**.
 
 1. **Claude Code** = integrasi paling dalam (monitor, kendali, approval).
-2. **OMP** dan provider lain (Codex CLI, OpenClaw, Gemini CLI, API OpenAI-compatible) lewat satu antarmuka koneksi.
+2. **OMP (Oh My Pi)** dan provider lain (Codex CLI, OpenClaw, Gemini CLI, API OpenAI-compatible) lewat satu antarmuka koneksi.
 3. **Kejujuran data**: status yang tampil harus berasal dari sumber nyata; kalau tak tersedia tampilkan "tidak tersedia", bukan angka palsu.
 
 Bukan tujuan v1: editor kode di UI, multi-user/SaaS.
@@ -82,7 +82,7 @@ interface AgentConnection {
 | Adapter | Cara | Catatan |
 |---|---|---|
 | `claude-code` | transkrip + hooks + proses/SDK | fitur penuh |
-| `omp` | *asumsi*: CLI/RPC dengan keluaran JSON-lines | **perlu konfirmasi apa itu OMP** |
+| `omp` | **Oh My Pi** (`omp`, fork Pi, [can1357/oh-my-pi](https://github.com/can1357/oh-my-pi)): (a) monitor transkrip JSONL di `~/.omp/agent/sessions/`; (b) kendali lewat `omp --mode rpc` (JSONL via stdio) | flag RPC persis **belum diverifikasi** (dokumen Pi upstream: `--mode rpc`; wrapper pihak ketiga memakai `rpc-ui`); cek `omp --help` sebelum fase 5 |
 | `codex` | transkrip sesi Codex CLI + proses | seperti claude-code, format berbeda |
 | `acp` | Agent Client Protocol via stdio | satu adapter untuk banyak agent |
 | `openai-compat` | loop tool-use sendiri via HTTP | ditunda |
@@ -168,7 +168,7 @@ Dibedakan:
 ## 12. Pertanyaan terbuka
 
 1. **Bangun baru atau fork/kontribusi ke CrewHub?** Fork = cepat tetapi terikat AGPL dan arah proyek mereka. Rekomendasi: bangun baru, bila tujuan Anda berbeda (mis. kanban+worktree+approval sebagai inti).
-2. **OMP** = apa persisnya dan bagaimana integrasinya?
+2. **OMP** = Oh My Pi (dikonfirmasi). Perlu: versi `omp` yang dipakai, dan output `omp --help` / contoh satu file sesi di `~/.omp/agent/sessions/` agar parser tidak menebak.
 3. Di mana ini dijalankan: laptop lokal, VPS/server, atau keduanya? (menentukan apakah modul metrics/tunnel dibutuhkan)
 4. Gaya karakter: robot (seperti referensi), orang/chibi, atau hewan? Pakai aset sendiri atau kami buatkan?
 5. Provider mana yang paling dulu setelah Claude Code: OMP, Codex, atau yang lain?
