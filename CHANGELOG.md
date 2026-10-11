@@ -6,7 +6,7 @@ Versi: [Semantic Versioning](https://semver.org/lang/id/)
 ## [Unreleased]
 
 ### Added
-- Rancangan awal Mission Control (docs/design) dan ADR-0001.
+- Rancangan Mission Control v0.2 (docs/design), diselaraskan dengan spesifikasi referensi, dan ADR-0001.
 ### Changed
 ### Deprecated
 ### Removed

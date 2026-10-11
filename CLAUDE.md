@@ -1,6 +1,6 @@
 # Mission Control
 
-Dashboard 3D untuk memantau dan mengarahkan AI coding agent (utama: Claude Code; juga OMP & provider lain) dengan kanban task management. Status: tahap rancangan, belum ada kode.
+Dashboard 3D (robot) untuk memantau dan mengarahkan AI agent. Utama: Claude Code, juga OMP dan provider lain, plus kanban. Node tanpa dependensi, satu index.html, ledger JSONL. Status: tahap rancangan, belum ada kode.
 
 ## Dokumentasi
 - Rancangan: @docs/design/mission-control.md

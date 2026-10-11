@@ -1,4 +1,4 @@
-# ADR-0001: Daemon TypeScript lokal + UI web (react-three-fiber) dengan adapter provider
+# ADR-0001: Node.js tanpa dependensi + satu index.html, ledger JSONL sebagai sumber kebenaran
 
 - **Status:** Proposed
 - **Tanggal:** 2026-10-11
@@ -6,29 +6,31 @@
 
 ## Context
 
-Mission Control harus memvisualkan banyak agent sebagai karakter 3D, punya kanban, terintegrasi paling dalam dengan Claude Code, dan tetap bisa menyambung ke OMP serta provider lain. Repo masih kosong; belum ada batasan sistem lama.
+Pemilik sudah menulis spesifikasi Mission Control (Google Doc referensi): backend Node tanpa dependensi, frontend satu `index.html` dengan Three.js r128 lokal, data JSON/JSONL tanpa database, polling 3 detik, dan prinsip "tidak ada data palsu". Target dijalankan di VPS/container kecil dan dibuka lewat tunnel. Kebutuhan tambahan: kanban, integrasi Claude Code, dan provider lain (OMP, dst.).
+
+Versi awal rancangan ini mengusulkan stack React + react-three-fiber + SQLite + Claude Agent SDK; itu diganti karena bertentangan dengan batasan referensi.
 
 ## Options considered
 
-1. **Daemon Node/TS + UI web (three.js/R3F)** — satu bahasa, Claude Agent SDK tersedia di TS, 3D web paling matang. Kekurangan: tak ada akses native ke GPU/OS tanpa pembungkus.
-2. **Aplikasi desktop native (Tauri/Electron sejak awal)** — pengalaman lebih "app", tapi menambah beban build/rilis sebelum produk terbukti.
-3. **Game engine (Unity/Godot)** — visual terbaik, tetapi integrasi proses/SDK/kanban jauh lebih berat dan sulit dikontribusikan.
+1. **Zero-dependency Node + single-file HTML + ledger JSONL (sesuai referensi)** - mudah di-deploy dan diaudit, tanpa build/npm. Kekurangan: tanpa framework dan loader GLB; kode UI besar dalam satu file.
+2. **React + R3F + SQLite + SDK** - ergonomi dan ekosistem lebih baik, tetapi menambah build step, npm, dan melanggar batasan referensi.
 
 ## Decision
 
-Opsi 1: daemon lokal Node/TS (event bus, SQLite, hook receiver, MCP server) dan UI web React + react-three-fiber. Semua provider masuk lewat interface `AgentProvider` yang menormalkan event ke `MissionEvent`. Pembungkus desktop (Tauri) bisa ditambah belakangan tanpa mengubah inti.
+Opsi 1. Ledger `data/tasks.jsonl` adalah sumber kebenaran status agent; semua provider (Claude Code lewat hooks dan headless `claude -p --output-format stream-json`, OMP, generic-cli) hanya meng-append event ke sana lewat adapter kecil. Kanban disimpan di `data/board.json` dan terhubung ke ledger lewat `task_id`. Karakter robot dibangun prosedural dari primitif Three.js.
 
 ## Consequences
 
 **Yang jadi lebih mudah:**
-- Menambah provider = satu adapter; UI tak berubah.
-- Integrasi Claude Code (SDK, hooks, MCP) tinggal di satu bahasa.
+- Deploy `node server.js`; tidak ada npm/build; mudah diverifikasi dengan `node --check` dan `curl`.
+- Provider baru = satu adapter yang menulis event ledger.
 
 **Yang jadi lebih sulit / harga yang kita bayar:**
-- Performa 3D dibatasi browser; perlu mode lite.
-- Skema `MissionEvent` harus dijaga stabil; perubahan memengaruhi semua adapter.
-- Fitur provider tak seragam, sehingga UI harus mengikuti `capabilities`.
+- Tanpa SDK Claude, kita mem-parse stream-json sendiri; format bisa berubah antarversi CLI.
+- Polling 3 detik, bukan push; animasi bisa tertinggal beberapa detik.
+- JSONL tumbuh terus (perlu rotasi) dan tulis konkuren perlu `appendFile` per baris.
+- Satu `index.html` besar sulit dirawat; karakter prosedural kurang detail dibanding GLB.
 
 **Yang perlu dipantau:**
-- Bila 3D di browser tak mencapai 60 fps dengan >6 agent, tinjau ulang (OffscreenCanvas/WebGPU atau desktop native).
-- Setelah arti "OMP" terkonfirmasi: bila tak bisa lewat CLI/ACP, tinjau interface adapter.
+- Jika `index.html` melewati sekitar 3000 baris atau perlu GLB/animasi skeletal, pecah jadi modul atau izinkan loader yang di-vendor.
+- Jika perlu kendali dua arah real-time (approval), tinjau SSE/WebSocket.
