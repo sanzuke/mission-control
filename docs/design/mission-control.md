@@ -1,6 +1,6 @@
 # Rancangan Mission Control
 
-> Status: draft v0.3 · 2026-10-11 · dokumen living (edit di tempat, riwayat lewat `git log -p`)
+> Status: draft v0.4 · 2026-10-11 · dokumen living (edit di tempat, riwayat lewat `git log -p`)
 > Referensi (bukan spesifikasi mengikat):
 > - Google Doc "Mission Control": ternyata prompt untuk muse.ai. Diambil ide fiturnya, bukan batasan tekniknya.
 > - [EKINSOL-DEV/crewhub](https://github.com/EKINSOL-DEV/crewhub) (AGPL-3.0): dipelajari arsitekturnya (lihat bagian 11). **Tidak ada kode yang disalin.**
@@ -82,18 +82,58 @@ interface AgentConnection {
 | Adapter | Cara | Catatan |
 |---|---|---|
 | `claude-code` | transkrip + hooks + proses/SDK | fitur penuh |
-| `omp` | **Oh My Pi** (`omp`, fork Pi, [can1357/oh-my-pi](https://github.com/can1357/oh-my-pi)): (a) monitor transkrip JSONL di `~/.omp/agent/sessions/`; (b) kendali lewat `omp --mode rpc` (JSONL via stdio) | flag RPC persis **belum diverifikasi** (dokumen Pi upstream: `--mode rpc`; wrapper pihak ketiga memakai `rpc-ui`); cek `omp --help` sebelum fase 5 |
+| `omp` | Oh My Pi v18.8.9 (`omp`, [can1357/oh-my-pi](https://github.com/can1357/oh-my-pi)). Tiga jalur, lihat 5.1 | `omp acp` adalah jalur utama untuk kendali; skema event masih menunggu sampel |
 | `codex` | transkrip sesi Codex CLI + proses | seperti claude-code, format berbeda |
 | `acp` | Agent Client Protocol via stdio | satu adapter untuk banyak agent |
 | `openai-compat` | loop tool-use sendiri via HTTP | ditunda |
 
+### 5.1 Adapter OMP (Oh My Pi)
+
+Dari `omp --help` (v18.8.9) tersedia hal-hal berikut. Yang bertanda ✔ langsung terbaca di help; yang bertanda ? adalah inferensi yang harus diuji.
+
+| Kebutuhan | Cara di OMP | Status |
+|---|---|---|
+| Kendali dua arah | `omp acp` — server **Agent Client Protocol** via stdio (JSON-RPC). Dipakai bersama adapter `acp` generik | ✔ ada; ? cakupan event & permission |
+| Alternatif kendali | `omp --mode rpc` / `rpc-ui` (+ `--no-ui` untuk headless) | ✔ ada; ? skema pesan |
+| Satu kali jalan | `omp -p "…" --mode json` (keluaran JSON) | ✔ ada; ? apakah streaming per event |
+| Pantau sesi | berkas JSONL di `~/.omp/agent/sessions/--<path>--/session.jsonl` (bisa digeser `PI_CODING_AGENT_DIR` / `--session-dir`) | ✔ lokasi dari contoh `--export`; ? format record |
+| Izin tool | `--approval-mode always-ask\|write\|yolo`, `--auto-approve`; di `rpc-ui` "tool UI" tetap aktif | ✔ flag ada; ? bagaimana permintaan izin dikirim lewat ACP/RPC |
+| Isolasi | `--profile <nama>` (auth, sesi, settings terpisah), `--cwd`, `--add-dir`, `--no-session` | ✔ |
+| Worktree | `omp worktree` (add/list/clear) — bisa dipakai WorktreeManager atau cukup `git worktree` kita sendiri | ✔ ada |
+| Hook/ekstensi | `--hook <file>` / `-e <file>` memuat ekstensi → bisa mendorong event ke Mission Control (setara hooks Claude) | ✔ ada; ? API ekstensi |
+| Subagent | tool `task` meluncurkan subagent paralel; `omp anonymize` menyebut "session and its subagents" → subagent punya berkas sendiri | ✔ tersirat |
+| Batas/biaya | `omp usage` (limit provider tiap akun), `omp stats`; `--max-time` | ✔ → menu Token/Usage |
+| Proses latar | `omp ps` (daftar & kendali proses daemon-supervised) | ✔ |
+| Mode/peran model | `--model`, `--smol`, `--slow`, `--plan`; `--goal`, `--plan-yolo` | ✔ → tampil di Inspector |
+| Impor lintas-agent | `--from-claude`, `--from-codex` | ✔ bisa untuk "handoff" Claude → OMP |
+| Kolaborasi | `omp collab` (host session lokal), `omp stream` | ? tidak dipakai v1 |
+
+Urutan implementasi: (1) **observe** lewat watcher berkas sesi; (2) **run/interrupt** lewat `omp acp`; (3) **approval** setelah skema izin ACP diverifikasi; fallback `--mode rpc`. Seluruh asumsi ? ditutup dengan "golden file" dari sampel nyata sebelum Fase 5.
+
 Kontrak diuji dengan rekaman event (golden files) per provider karena format tiap CLI berubah antarversi.
+
+## 5.2 Penerapan lokal + VPS (dua-duanya)
+
+Watcher transkrip, hooks, dan proses agent berjalan **di mesin tempat agent hidup**, sedangkan dashboard bisa di mesin lain. Maka dibedakan dua peran:
+
+```
+Laptop A ── Collector ──┐                      ┌── Browser (laptop / HP)
+Laptop B ── Collector ──┼──► Daemon (VPS atau lokal) ──┤
+VPS agent ─ Collector ──┘   (SQLite, SSE, Kanban)      └── (lewat tunnel/TLS)
+```
+
+- **Collector** = proses kecil di sisi agent: menjalankan adapter (watcher transkrip, hooks receiver lokal, spawn `claude`/`omp`), lalu mengirim `MissionEvent` ke daemon dan menerima perintah (start/interrupt/approve).
+- **Daemon** = pusat: event bus, SQLite, kanban, SSE ke UI. Pada mode lokal, collector dan daemon berjalan satu proses (`mission-control` tanpa argumen).
+- Koneksi collector → daemon: keluar dari collector (outbound WebSocket/HTTPS) sehingga laptop tidak perlu port terbuka; autentikasi dengan token per-collector yang bisa dicabut.
+- Setiap `Agent` dan `Session` membawa `hostId`; worktree dan eksekusi `claude`/`omp` terjadi di host pemilik repo.
+- Konsekuensi: sinkronisasi repo/worktree antar-host **bukan** tanggung jawab kita; kartu kanban menunjuk ke `hostId` + path repo.
+- Metrics host (CPU/memori/disk) dikirim collector, bukan dibaca daemon.
 
 ## 6. Dunia 3D
 
 - **Scene**: kampus/kantor toon-shaded; **ruangan per proyek** (dari blueprint JSON) dengan meja kerja dan meja rapat. Lingkungan dapat diganti (kantor malam, taman, dst.).
 - **Kamera**: 3 level zoom — overview → fokus ruangan → close-up karakter. Aksi: klik karakter = Inspector; drag karakter ke ruangan lain = pindahkan agent; gelembung aktivitas di atas kepala.
-- **Karakter**: bot dengan kepribadian/peran (Worker, Thinker, Coder, Designer, Comms…), aksesori per peran. Mulai prosedural; dukungan GLB belakangan.
+- **Karakter (campuran gaya)**: tiap agent memilih `bodyType` = `robot | human | animal` + palet warna + aksesori per peran (Coder, Designer, Researcher, QA, PM…). Satu rig/skeleton standar dan satu set klip animasi dipakai semua tipe, sehingga menambah gaya baru = menambah model, bukan menulis ulang animasi. Fase 2 memakai robot prosedural; human/animal ditambahkan sebagai GLB (aset sendiri atau di-generate lalu di-rig ke skeleton standar). Provider ikut terbaca visual lewat lencana kecil di karakter (Claude/OMP/dll.).
 - **Gerak**: jalan antar-ruangan dengan pathfinding A\*, tolak-menolak antar bot supaya tidak menumpuk, spawn sadar-grid.
 - **Mapping aktivitas → animasi**:
   | Activity | Visual |
@@ -167,8 +207,10 @@ Dibedakan:
 
 ## 12. Pertanyaan terbuka
 
-1. **Bangun baru atau fork/kontribusi ke CrewHub?** Fork = cepat tetapi terikat AGPL dan arah proyek mereka. Rekomendasi: bangun baru, bila tujuan Anda berbeda (mis. kanban+worktree+approval sebagai inti).
-2. **OMP** = Oh My Pi (dikonfirmasi). Perlu: versi `omp` yang dipakai, dan output `omp --help` / contoh satu file sesi di `~/.omp/agent/sessions/` agar parser tidak menebak.
-3. Di mana ini dijalankan: laptop lokal, VPS/server, atau keduanya? (menentukan apakah modul metrics/tunnel dibutuhkan)
-4. Gaya karakter: robot (seperti referensi), orang/chibi, atau hewan? Pakai aset sendiri atau kami buatkan?
-5. Provider mana yang paling dulu setelah Claude Code: OMP, Codex, atau yang lain?
+Sudah dijawab: bangun baru (bukan fork CrewHub); lokal **dan** VPS; gaya karakter campuran; OMP = Oh My Pi v18.8.9.
+
+1. **Sampel OMP (sedang disiapkan)**: satu file `session.jsonl`; keluaran `omp -p "hello" --mode json`; log singkat `omp acp` saat satu prompt dengan satu panggilan tool (mis. `read`). Redaksi secret/path pribadi lebih dulu (ada `omp anonymize`).
+2. Jalur OMP mana yang Anda pakai sehari-hari: sesi interaktif di terminal (→ cukup observe) atau Anda ingin Mission Control yang **menjalankan** OMP (→ acp/rpc)?
+3. Apakah Claude Code dan OMP sering dipakai di repo yang sama (menentukan aturan satu-worktree-per-kartu dan pemilihan agent per kartu)?
+4. Siapa saja yang mengakses dashboard dari VPS (hanya Anda, atau tim)? Menentukan apakah cukup token tunggal atau perlu akun.
+5. Aset karakter: pakai model gratis/lisensi terbuka, atau ada yang ingin dibuat khusus?

@@ -19,7 +19,7 @@ Riwayat: draf awal memilih Node/TS + R3F; draf kedua sempat pindah ke zero-depen
 
 ## Decision
 
-Opsi 1. Setiap provider mengimplementasikan `AgentConnection` dan mengeluarkan `MissionEvent`; UI hanya bergantung pada `capabilities`. Claude Code dipantau lewat transkrip JSONL + hooks dan dikendalikan lewat SDK/proses `claude`. Kode ditulis dari nol (tidak menyalin CrewHub) untuk menghindari kewajiban AGPL.
+Opsi 1. Setiap provider mengimplementasikan `AgentConnection` dan mengeluarkan `MissionEvent`; UI hanya bergantung pada `capabilities`. Claude Code dipantau lewat transkrip JSONL + hooks dan dikendalikan lewat SDK/proses `claude`. Kode ditulis dari nol (tidak menyalin CrewHub) untuk menghindari kewajiban AGPL. Karena penggunaan lokal dan VPS sekaligus, adapter berjalan di proses **Collector** di sisi agent dan mengirim event ke Daemon pusat (satu proses pada mode lokal). Untuk OMP (Oh My Pi), kendali memakai `omp acp` (ACP via stdio) dengan watcher berkas sesi untuk observasi.
 
 ## Consequences
 
@@ -28,6 +28,7 @@ Opsi 1. Setiap provider mengimplementasikan `AgentConnection` dan mengeluarkan `
 - Satu bahasa untuk daemon, UI, dan tipe event.
 
 **Yang jadi lebih sulit / harga yang kita bayar:**
+- Dua proses (Collector dan Daemon) berarti protokol, autentikasi per-collector, dan penanganan koneksi putus harus dirancang; sinkronisasi repo antar-host bukan urusan kita.
 - Format transkrip/stream tiap CLI berubah antarversi; perlu golden-file test per provider.
 - Fitur provider tidak seragam sehingga UI harus mengikuti `capabilities`.
 - Ada build step dan dependensi npm; mode Docker hanya bisa monitor.
